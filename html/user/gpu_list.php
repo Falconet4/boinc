@@ -187,7 +187,7 @@ function show_list($models, $name) {
     foreach ($models as $model=>$x) {
         if ($x->count < $max_count/10) continue;
         $s = number_format($min_time/$x->avg_time, 3);
-        echo "<li>($s)  $model\n";
+        echo "<li>($s)  ".htmlspecialchars($model)."\n";
     }
     echo "</ol></td>\n";
 }
@@ -232,7 +232,7 @@ if (!$data) {
 page_head(tra("Top GPU models"));
 echo tra("The following lists show the most productive GPU models on different platforms.  Relative speeds, measured by average elapsed time of tasks, are shown in parentheses.");
 show_vendor("NVIDIA", $data->cuda);
-show_vendor("ATI/AMD", $data->ati);
+show_vendor("AMD", $data->ati);
 show_vendor("Intel", $data->intel_gpu);
 show_vendor("Apple", $data->apple_gpu);
 echo "<p><p>Generated ".time_str($data->time);
