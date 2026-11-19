@@ -30,6 +30,7 @@ if (project_config_bool("disable_team_creation")) {
 check_get_args(array());
 
 $user = get_logged_in_user();
+check_tokens();
 
 if (defined('TEAM_CREATE_NEED_CREDIT') && TEAM_CREATE_NEED_CREDIT) {
     if ($user->total_credit == 0) {

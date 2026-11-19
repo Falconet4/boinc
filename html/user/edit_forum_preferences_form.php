@@ -34,6 +34,7 @@ text_counter_script();
 
 start_table();
 echo "<form method=\"post\" action=\"edit_forum_preferences_action.php\" enctype=\"multipart/form-data\">";
+echo form_tokens();
 
 // ------------ Notification -----------
 
@@ -207,9 +208,11 @@ row2(tra("Or click here to reset preferences to the defaults"),
     sprintf('<form method="post" action="edit_forum_preferences_action.php">
         <input %s class="btn" type="submit" value="%s">
         <input type="hidden" name="action" value="reset_confirm">
+        %s
         </form>',
         button_style('darkgoldenrod'),
-        tra("Reset")
+        tra("Reset"),
+        form_tokens()
     )
 );
 end_table();

@@ -49,6 +49,7 @@ if ($user->id == $team->ping_user) {
         echo tra("60 days have elapsed since your request, and the founder has not responded. You may now assume foundership by clicking here:")
             ."<form method=\"post\" action=\"team_founder_transfer_action.php\">
             <input type=\"hidden\" name=\"action\" value=\"finalize_transfer\">
+            ".form_tokens()."
         ";
         show_submit_button(tra("Assume foundership"));
         echo "
@@ -61,6 +62,7 @@ if ($user->id == $team->ping_user) {
 } else {
     if (new_transfer_request_ok($team, $now)) {
         echo "<form method=\"post\" action=\"team_founder_transfer_action.php\">";
+        echo form_tokens();
         echo "<p>".tra("If the team founder is not active and you want to assume the role of founder, click the button below. The current founder will be sent an email detailing your request, and will be able to transfer foundership to you or to decline your request. If the founder does not respond in 60 days, you will be allowed to become the founder.<br /><br />
                        Are you sure you want to request foundership?")
         ."</p>";

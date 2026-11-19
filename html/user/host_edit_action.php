@@ -35,6 +35,7 @@ function get_host($hostid, $user) {
 }
 
 $user = get_logged_in_user();
+check_tokens();
 
 page_head(tra("Merge computer records"));
 

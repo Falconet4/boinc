@@ -38,6 +38,7 @@ $t = time_str($host->create_time);
 echo tra("Sometimes BOINC assigns separate identities to the same computer by mistake. You can correct this by merging old identities with the newest one.")."
     <form name=host_list action=host_edit_action.php>
     <input type=hidden name=id_0 value=$hostid>
+    ".form_tokens()."
     <p>
 ";
 
