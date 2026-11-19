@@ -835,7 +835,9 @@ void set_no_rsc_config() {
             }
             p->no_rsc_config[j] = true;
             for (int k=0; k<c.count; k++) {
-                if (allowed[c.device_nums[k]]) {
+                int n = c.device_nums[k];
+                if (n < 0 || n >= MAX_COPROC_INSTANCES) continue;
+                if (allowed[n]) {
                     p->no_rsc_config[j] = false;
                     break;
                 }
