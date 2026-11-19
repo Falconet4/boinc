@@ -168,9 +168,27 @@ int COPROC::parse(XML_PARSER& xp) {
 void summary_json(
     char *buf,
     const char *type, const char *model, int count, int ram_mb,
-    const char *driver_version, int opencl_version
+    const char *driver_version, int opencl_version,
+    bool have_hip=false, const char* gcn_arch="", int hip_version=0
 ) {
-    sprintf(buf,
+    if (have_hip) {
+        sprintf(buf,
+"        {\n"\
+"            \"type\": \"%s\",\n"\
+"            \"model\": \"%s\",\n"\
+"            \"count\": %d,\n"\
+"            \"ram_mb\": %d,\n"\
+"            \"driver_version\": \"%s\",\n"\
+"            \"opencl_version\": \"%d\",\n"\
+"            \"hip\": true,\n"\
+"            \"hip_version\": %d,\n"\
+"            \"gcn_arch\": \"%s\"\n"\
+"        }",
+            type, model, count, ram_mb, driver_version, opencl_version,
+            hip_version, gcn_arch
+        );
+    } else {
+        sprintf(buf,
 "        {\n"\
 "            \"type\": \"%s\",\n"\
 "            \"model\": \"%s\",\n"\
@@ -179,8 +197,9 @@ void summary_json(
 "            \"driver_version\": \"%s\",\n"\
 "            \"opencl_version\": \"%d\"\n"\
 "        }",
-        type, model, count, ram_mb, driver_version, opencl_version
-    );
+            type, model, count, ram_mb, driver_version, opencl_version
+        );
+    }
 }
 
 void COPROCS::summary_string_json(string &out) {
@@ -205,7 +224,8 @@ void COPROCS::summary_string_json(string &out) {
             "amd",
             ati.name, ati.count,
             ati.attribs.localRAM, ati.version,
-            ati.opencl_prop.opencl_device_version_int
+            ati.opencl_prop.opencl_device_version_int,
+            ati.have_hip, ati.gcn_arch, ati.hip_version
         );
         out += buf2;
     }
@@ -1012,8 +1032,23 @@ int COPROC_ATI::parse(XML_PARSER& xp) {
     return ERR_XML_PARSE;
 }
 
+// HIP encodes the runtime version as major*10000000 + minor*100000 + patch.
+// Keep the integer for comparisons; format it for human-readable output.
+//
+void format_hip_version(int v, char* buf, int buflen) {
+    int major = v / 10000000;
+    int minor = (v / 100000) % 100;
+    int patch = v % 100000;
+    if (patch) {
+        snprintf(buf, buflen, "%d.%d.%d", major, minor, patch);
+    } else {
+        snprintf(buf, buflen, "%d.%d", major, minor);
+    }
+}
+
 void COPROC_ATI::description(char* buf, int buflen) {
     char dp[64];
+    char hip_ver[32];
     if (peak_flops_dp > 0) {
         snprintf(dp, sizeof(dp), ", %s FP64",
             flops_to_string(peak_flops_dp).c_str()
@@ -1022,9 +1057,10 @@ void COPROC_ATI::description(char* buf, int buflen) {
         dp[0] = 0;
     }
     if (have_hip) {
+        format_hip_version(hip_version, hip_ver, sizeof(hip_ver));
         snprintf(buf, buflen,
-            "%s (HIP version %d, %s, %.2fGB, %.2fGB available, %s peak%s)",
-            name, hip_version, gcn_arch[0] ? gcn_arch : "unknown arch",
+            "%s (HIP version %s, %s, %.2fGB, %.2fGB available, %s peak%s)",
+            name, hip_ver, gcn_arch[0] ? gcn_arch : "unknown arch",
             attribs.localRAM/1024., available_ram/GIGA,
             flops_to_string(peak_flops).c_str(), dp
         );

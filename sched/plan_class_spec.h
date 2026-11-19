@@ -20,7 +20,44 @@
 
 #include <string>
 #include <vector>
+#include <memory>
 #include <regex.h>
+
+// Owns a compiled POSIX regex.  PLAN_CLASS_SPEC is copied into a vector,
+// so the compiled regex lives in shared storage: copies share it and the
+// last one frees it.  Without this, every parsed plan class leaked its
+// compiled regexes and copies shared the same underlying buffer.
+//
+class PLAN_CLASS_REGEX {
+public:
+    struct STATE {
+        regex_t re;
+        bool compiled = false;
+        ~STATE() {
+            if (compiled) regfree(&re);
+        }
+    };
+
+    PLAN_CLASS_REGEX() : state(std::make_shared<STATE>()) {}
+    regex_t* get() { return &state->re; }
+    bool is_set() const { return state->compiled; }
+
+    // Compile a pattern, releasing any previously compiled form first.
+    // Returns regcomp()'s result; the regex stays unset on failure.
+    //
+    int compile(const char* pattern, int flags) {
+        if (state->compiled) {
+            regfree(&state->re);
+            state->compiled = false;
+        }
+        int ret = regcomp(&state->re, pattern, flags);
+        state->compiled = (ret == 0);
+        return ret;
+    }
+
+private:
+    std::shared_ptr<STATE> state;
+};
 
 // Represents a plan class, as specified in XML
 // if you add anything here:
@@ -56,12 +93,9 @@ struct PLAN_CLASS_SPEC {
     double mem_usage_per_cpu;
     bool nthreads_cmdline;
     double projected_flops_scale;
-    bool have_os_regex;
-    regex_t os_regex;
-    bool have_cpu_vendor_regex;
-    regex_t cpu_vendor_regex;
-    bool have_cpu_model_regex;
-    regex_t cpu_model_regex;
+    PLAN_CLASS_REGEX os_regex;
+    PLAN_CLASS_REGEX cpu_vendor_regex;
+    PLAN_CLASS_REGEX cpu_model_regex;
     double min_os_version;
         // Win versions can be 9 digits; may as well be safe
     double max_os_version;
@@ -70,8 +104,7 @@ struct PLAN_CLASS_SPEC {
     int min_libc_version;
         // if WSL: applies to WSL distro
     char project_prefs_tag[256];
-    bool have_project_prefs_regex;
-    regex_t project_prefs_regex;
+    PLAN_CLASS_REGEX project_prefs_regex;
     bool project_prefs_default_true;
     double avg_ncpus;
     int min_core_client_version;
@@ -98,8 +131,7 @@ struct PLAN_CLASS_SPEC {
         // the project prefs tag for user-supplied gpu_utilization factor
     double min_gpu_peak_flops;
     double max_gpu_peak_flops;
-    bool have_gpu_type_regex;
-    regex_t gpu_type_regex;
+    PLAN_CLASS_REGEX gpu_type_regex;
 
     // AMD/ATI apps
     //
@@ -112,6 +144,10 @@ struct PLAN_CLASS_SPEC {
     int min_cal_target;
     int max_cal_target;
     bool without_opencl; // restrict to CAL only GPUs
+    bool require_hip;    // require the AMD device to report HIP support
+    int min_hip_version; // minimum HIP runtime version (encoded value)
+    PLAN_CLASS_REGEX gcn_arch_regex;
+        // restricts the AMD gfx target, e.g. ^gfx(11|12)
 
     // Double-precision selection.  Both are optional: with neither set,
     // FP64 work goes to any GPU (including ones that do not report FP64).

@@ -338,6 +338,34 @@ function docker_desc($misc) {
     return $x;
 }
 
+// Format the encoded HIP runtime version as major.minor[.patch].
+//
+function hip_version_string($version) {
+    $version = intval($version);
+    $major = intval($version / 10000000);
+    $minor = intval(intval($version / 100000) % 100);
+    $patch = $version % 100000;
+    if ($patch) {
+        return sprintf('%d.%d.%d', $major, $minor, $patch);
+    }
+    return sprintf('%d.%d', $major, $minor);
+}
+
+// Map an AMD gfx target to its architecture family.
+//
+function amd_gcn_family($arch) {
+    if (preg_match('/^gfx10(10|11|12)/', $arch)) return 'RDNA 1';
+    if (preg_match('/^gfx10(3[0-9])/', $arch)) return 'RDNA 2';
+    if (preg_match('/^gfx115/', $arch)) return 'RDNA 3.5';
+    if (preg_match('/^gfx11/', $arch)) return 'RDNA 3';
+    if (preg_match('/^gfx12/', $arch)) return 'RDNA 4';
+    if ($arch == 'gfx908') return 'CDNA 1';
+    if ($arch == 'gfx90a') return 'CDNA 2';
+    if (preg_match('/^gfx94/', $arch)) return 'CDNA 3';
+    if (preg_match('/^gfx95/', $arch)) return 'CDNA 4';
+    return '';
+}
+
 // return a human-readable version of the GPU info
 //
 function gpu_desc($misc) {
@@ -359,6 +387,20 @@ function gpu_desc($misc) {
                 intval($g->opencl_version)/100,
                 intval($g->opencl_version)%100
             );
+        }
+        if (!empty($g->hip)) {
+            if (!empty($g->hip_version)) {
+                $x .= sprintf('; HIP: %s',
+                    hip_version_string($g->hip_version)
+                );
+            } else {
+                $x .= '; HIP: installed';
+            }
+            if (!empty($g->gcn_arch)) {
+                $arch = htmlspecialchars($g->gcn_arch);
+                $family = amd_gcn_family($g->gcn_arch);
+                $x .= $family ? " ($family, $arch)" : " ($arch)";
+            }
         }
         $gpus[] = $x;
     }

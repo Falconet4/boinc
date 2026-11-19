@@ -66,6 +66,11 @@ static HIP_SET_DEVICE p_hipSetDevice = NULL;
 static HIP_GET_PCI_BUS_ID p_hipDeviceGetPCIBusId = NULL;
 
 #ifdef _WIN32
+// Highest ROCm runtime major version whose versioned DLL name we probe.
+// The DLL is amdhip64_<major>.dll from ROCm 6 onwards.
+//
+#define HIP_MAX_VERSIONED_MAJOR 10
+
 static void* hip_dlopen(const char* name) {
     return (void*)LoadLibraryA(name);
 }
@@ -89,19 +94,35 @@ static void* load_hip_library() {
     vector<string> paths;
 
 #ifdef _WIN32
-    // The HIP SDK ships amdhip64.dll in <ROCM_PATH>\bin and normally
-    // adds that directory to PATH; try the environment first.
+    // The HIP SDK ships the runtime in <ROCM_PATH>\bin and normally adds
+    // that directory to PATH; try the environment first.
+    //
+    // ROCm 6 and later name the DLL with the runtime major version
+    // (amdhip64_6.dll, amdhip64_7.dll) and do not provide an unversioned
+    // amdhip64.dll, so both spellings must be tried.  Newest first.
     //
     const char* envs[] = {"HIP_PATH", "ROCM_PATH"};
     for (const char* e: envs) {
         const char* v = getenv(e);
         if (v && v[0]) {
+            char name[64];
             paths.push_back(string(v) + "\\bin\\amdhip64.dll");
             paths.push_back(string(v) + "\\bin\\libamdhip64.dll");
+            for (int i=HIP_MAX_VERSIONED_MAJOR; i>=1; i--) {
+                snprintf(name, sizeof(name), "\\bin\\amdhip64_%d.dll", i);
+                paths.push_back(string(v) + name);
+            }
         }
     }
-    paths.push_back("amdhip64.dll");
-    paths.push_back("libamdhip64.dll");
+    {
+        char name[64];
+        paths.push_back("amdhip64.dll");
+        paths.push_back("libamdhip64.dll");
+        for (int i=HIP_MAX_VERSIONED_MAJOR; i>=1; i--) {
+            snprintf(name, sizeof(name), "amdhip64_%d.dll", i);
+            paths.push_back(name);
+        }
+    }
 #else
     const char* rocm_path = getenv("ROCM_PATH");
     if (rocm_path && rocm_path[0]) {
@@ -215,6 +236,13 @@ static bool kfd_lookup(
 static void gfx_target_to_string(int target, char* buf, int len) {
     if (target <= 0) {
         safe_strcpy(buf, "");
+        return;
+    }
+    // KFD encodes gfx90a as 90010 (minor 0, stepping 10), which would
+    // otherwise be rendered as "gfx9010".
+    //
+    if (target == 90010) {
+        safe_strcpy(buf, "gfx90a");
         return;
     }
     int major = target / 10000;
@@ -362,23 +390,21 @@ void COPROC_ATI::get_hip(vector<string>& warnings) {
             cc.hip_memory_bus_width = v;
         }
 
-        // Total/Free VRAM.  hipMemGetInfo() takes size_t; the
-        // TotalGlobalMem attribute is an int and overflows above 2 GB.
-
-        double total_mem = 0;
-
-        // Free VRAM.  This creates a primary context for the device, which
-        // is fine because we run in the short-lived detection process.
+        // Total VRAM.  hipMemGetInfo() takes size_t; the TotalGlobalMem
+        // attribute is an int and overflows above 2 GB.
         //
-        double free_mem = 0;
+        // BOINC's current AMD/OpenCL path reports total VRAM in
+        // available_ram as a fallback, so keep the HIP path consistent.
+        // We still query the runtime to obtain the reliable total size.
+        //
+        double total_mem = 0;
         if (p_hipSetDevice && p_hipSetDevice(i) == HIP_SUCCESS) {
-            std::size_t f = 0, t = 0;
-            if (p_hipMemGetInfo(&f, &t) == HIP_SUCCESS) {
-                free_mem = (double)f;
-                if (!total_mem) total_mem = (double)t;
+            std::size_t free_bytes = 0, total_bytes = 0;
+            if (p_hipMemGetInfo(&free_bytes, &total_bytes) == HIP_SUCCESS) {
+                total_mem = (double)total_bytes;
             }
         }
-        cc.available_ram = free_mem ? free_mem : total_mem;
+        cc.available_ram = total_mem;
         cc.attribs.localRAM = (int)(total_mem/MEGA);
 
         int bus = -1;
@@ -409,7 +435,14 @@ void COPROC_ATI::get_hip(vector<string>& warnings) {
                 cc.gfx_target_version = gfx_target;
                 cc.gfxip_major = gfx_target / 10000;
                 cc.gfxip_minor = (gfx_target / 100) % 100;
-                gfx_target_to_string(gfx_target, cc.gcn_arch, sizeof(cc.gcn_arch));
+                // KFD's node name is authoritative when it provides one:
+                // it preserves letter suffixes such as gfx90a.
+                //
+                if (node_name[0] && !strncmp(node_name, "gfx", 3)) {
+                    safe_strcpy(cc.gcn_arch, node_name);
+                } else {
+                    gfx_target_to_string(gfx_target, cc.gcn_arch, sizeof(cc.gcn_arch));
+                }
                 // Only wave32 maps cleanly: SIMD count x wavefront size is
                 // the FP32 lane count.  For wave64 (GCN/CDNA) the SIMD
                 // count is the number of 16/32-lane units, so the product
@@ -484,9 +517,11 @@ void COPROC_ATI::get_hip(vector<string>& warnings) {
     }
 
     if (log_flags.coproc_debug) {
+        char hip_ver[32];
+        format_hip_version(runtime_version, hip_ver, sizeof(hip_ver));
         msg_printf(NULL, MSG_INFO,
-            "[coproc] HIP detected %d AMD GPU(s), runtime %d",
-            (int)ati_gpus.size(), runtime_version
+            "[coproc] HIP detected %d AMD GPU(s), runtime %s",
+            (int)ati_gpus.size(), hip_ver
         );
     }
 
