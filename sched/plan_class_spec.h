@@ -113,6 +113,14 @@ struct PLAN_CLASS_SPEC {
     int max_cal_target;
     bool without_opencl; // restrict to CAL only GPUs
 
+    // Double-precision selection.  Both are optional: with neither set,
+    // FP64 work goes to any GPU (including ones that do not report FP64).
+    //
+    bool require_fp64;
+        // host must report FP64 support (have_fp64)
+    double min_gpu_dp_flops;
+        // minimum estimated FP64 peak, in FLOPS
+
     // NVIDIA apps
     //
     int min_nvidia_compcap;

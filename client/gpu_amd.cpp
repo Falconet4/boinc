@@ -48,29 +48,6 @@ using std::string;
 
 static void get_available_ati_ram(COPROC_ATI &cc, vector<string>& warnings);
 
-// criteria:
-//
-// - double precision support
-// - local RAM
-// - speed
-//
-int ati_compare(COPROC_ATI& c1, COPROC_ATI& c2, bool loose) {
-    if (c1.attribs.doublePrecision && !c2.attribs.doublePrecision) return 1;
-    if (!c1.attribs.doublePrecision && c2.attribs.doublePrecision) return -1;
-    if (loose) {
-        if (c1.attribs.localRAM> 1.4*c2.attribs.localRAM) return 1;
-        if (c1.attribs.localRAM< .7* c2.attribs.localRAM) return -1;
-        return 0;
-    }
-    if (c1.attribs.localRAM > c2.attribs.localRAM) return 1;
-    if (c1.attribs.localRAM < c2.attribs.localRAM) return -1;
-    double s1 = c1.peak_flops;
-    double s2 = c2.peak_flops;
-    if (s1 > s2) return 1;
-    if (s1 < s2) return -1;
-    return 0;
-}
-
 #ifdef _WIN32
 typedef int (__stdcall *ATI_ATTRIBS) (CALdeviceattribs *attribs, CALuint ordinal);
 typedef int (__stdcall *ATI_CLOSE)(void);
@@ -397,69 +374,6 @@ leave:
 #endif
 }
 
-void COPROC_ATI::correlate(
-    bool use_all,
-    vector<int>& ignore_devs
-) {
-    char buf[256];
-
-    if (!ati_gpus.size()) return;
-
-    // find the most capable non-ignored instance
-    //
-    bool first = true;
-    unsigned int i;
-    for (i=0; i<ati_gpus.size(); i++) {
-        if (in_vector(ati_gpus[i].device_num, ignore_devs)) continue;
-        if (first) {
-            *this = ati_gpus[i];
-            first = false;
-        } else if (ati_compare(ati_gpus[i], *this, false) > 0) {
-            *this = ati_gpus[i];
-        }
-    }
-
-    // see which other instances are equivalent,
-    // and set the "count" and "device_nums" fields
-    //
-    count = 0;
-    for (i=0; i<ati_gpus.size(); i++) {
-        ati_gpus[i].description(buf, sizeof(buf));
-        if (in_vector(ati_gpus[i].device_num, ignore_devs)) {
-            ati_gpus[i].is_used = COPROC_IGNORED;
-        } else if (this->have_opencl && !ati_gpus[i].have_opencl) {
-            ati_gpus[i].is_used = COPROC_UNUSED;
-        } else if (this->have_cal && !ati_gpus[i].have_cal) {
-            ati_gpus[i].is_used = COPROC_UNUSED;
-        } else if (this->have_hip && !ati_gpus[i].have_hip) {
-            ati_gpus[i].is_used = COPROC_UNUSED;
-        } else if (use_all || !ati_compare(ati_gpus[i], *this, true)) {
-            device_nums[count] = ati_gpus[i].device_num;
-            count++;
-            ati_gpus[i].is_used = COPROC_USED;
-        } else {
-            ati_gpus[i].is_used = COPROC_UNUSED;
-        }
-    }
-}
-
-// get available RAM of ATI GPU
-//
-// CAUTION: as currently written, this method should be
-// called only from COPROC_ATI::get().  If in the future
-// you wish to call it from additional places:
-// * It must be called from a separate child process on
-//   dual-GPU laptops (e.g., Macbook Pros) with the results
-//   communicated to the main client process via IPC or a
-//   temp file.  See the comments about dual-GPU laptops
-//   in gpu_detect.cpp and main.cpp for more details.
-// * The CAL library must be loaded and calInit() called
-//   first.
-// * See client/coproc_detect.cpp and cpu_sched.cpp in
-//   BOINC 6.12.36 for an earlier attempt to call this
-//   from the scheduler.  Note that it was abandoned
-//   due to repeated calls crashing the driver.
-//
 static void get_available_ati_ram(COPROC_ATI &cc, vector<string>& warnings) {
     CALdevicestatus st;
     CALdevice dev;

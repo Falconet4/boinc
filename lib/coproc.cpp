@@ -596,10 +596,13 @@ int COPROC_NVIDIA::parse(XML_PARSER& xp) {
 // These are conservative values for the families BOINC is likely to
 // meet; returning 0 means "unknown" and reports no FP64 figure.
 //
-static double amd_fp64_ratio(int gfxip_major, const char* name) {
+static double amd_fp64_ratio(int gfxip_major, int gfx_target, const char* name) {
     if (gfxip_major >= 11) return 1./32.;   // RDNA 3/4
     if (gfxip_major == 10) return 1./16.;   // RDNA 1/2
     if (gfxip_major == 9) {
+        // CDNA 2 (MI200) has a 1:1 FP64 rate; MI100 and CDNA 3/4 are 1:2.
+        if (gfx_target >= 90010 && gfx_target < 90400) return 1.;
+        if (gfx_target >= 90008 && gfx_target < 90600) return 1./2.;
         if (strstr(name, "Instinct") || strstr(name, "MI")) return 1./2.;
         if (strstr(name, "Radeon VII")) return 1./4.;
         return 1./16.;                      // Vega consumer
@@ -1052,9 +1055,13 @@ void COPROC_ATI::set_peak_flops() {
         // (wave64), i.e. 64 lanes.
         //
         int lanes = hip_lane_count;
-        if (!lanes) {
-            int lanes_per_cu = (hip_warp_size == 32 || (!hip_warp_size && gfxip_major >= 10))
-                ? 128 : 64;
+        if (!lanes && hip_cu_count) {
+            int lanes_per_cu = 64;
+            if (hip_warp_size == 32 || (!hip_warp_size && gfxip_major >= 10)) {
+                lanes_per_cu = 128;     // RDNA: HIP reports one WGP
+            } else if (gfxip_major == 9 && gfx_target_version >= 90400) {
+                lanes_per_cu = 128;     // CDNA 3/4
+            }
             lanes = hip_cu_count * lanes_per_cu;
         }
         // One FMA per lane per clock is 2 FLOPs; RDNA 3+ (gfx11/gfx12)
@@ -1082,12 +1089,22 @@ void COPROC_ATI::set_peak_flops() {
         //
         // clock is in MHz
         double flops_per_lane_per_clock = (opencl_prop.gfxip_major >= 11) ? 4. : 2.;
-        x = opencl_prop.max_compute_units *
-            opencl_prop.amd_simd_per_compute_unit *
-            opencl_prop.amd_simd_width *
-            opencl_prop.amd_simd_instruction_width *
-            flops_per_lane_per_clock *
-            (opencl_prop.max_clock_frequency * 1.e6);
+        int lanes;
+        if (opencl_prop.gfxip_major >= 10) {
+            // RDNA: max_compute_units is a WGP, and SIMD width is 32.
+            lanes = opencl_prop.max_compute_units *
+                opencl_prop.amd_simd_per_compute_unit *
+                opencl_prop.amd_simd_width *
+                opencl_prop.amd_simd_instruction_width;
+        } else {
+            // GCN/CDNA: the reported SIMD width is the wavefront (64), not
+            // the number of FP32 lanes.  Each CU has 64 (128 on CDNA 3+).
+            int minor = gfxip_minor ? gfxip_minor : (int)opencl_prop.gfxip_minor;
+            int lanes_per_cu = (minor >= 4) ? 128 : 64;
+            lanes = opencl_prop.max_compute_units * lanes_per_cu;
+        }
+        x = lanes * flops_per_lane_per_clock
+            * (opencl_prop.max_clock_frequency * 1.e6);
 
     } else if (opencl_prop.max_compute_units) {
         // OpenCL gives us only:
@@ -1104,7 +1121,7 @@ void COPROC_ATI::set_peak_flops() {
     peak_flops_dp = 0;
     have_fp64 = false;
     int gm = gfxip_major ? gfxip_major : (int)opencl_prop.gfxip_major;
-    double ratio = amd_fp64_ratio(gm, name);
+    double ratio = amd_fp64_ratio(gm, gfx_target_version, name);
     if (ratio > 0 && x > 0) {
         peak_flops_dp = x * ratio;
         have_fp64 = true;

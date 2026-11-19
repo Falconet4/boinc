@@ -223,6 +223,69 @@ static void gfx_target_to_string(int target, char* buf, int len) {
     snprintf(buf, len, "gfx%d%d%d", major, minor, stepping);
 }
 
+int ati_compare(COPROC_ATI& c1, COPROC_ATI& c2, bool loose) {
+    if (c1.attribs.doublePrecision && !c2.attribs.doublePrecision) return 1;
+    if (!c1.attribs.doublePrecision && c2.attribs.doublePrecision) return -1;
+    if (loose) {
+        if (c1.attribs.localRAM> 1.4*c2.attribs.localRAM) return 1;
+        if (c1.attribs.localRAM< .7* c2.attribs.localRAM) return -1;
+        return 0;
+    }
+    if (c1.attribs.localRAM > c2.attribs.localRAM) return 1;
+    if (c1.attribs.localRAM < c2.attribs.localRAM) return -1;
+    double s1 = c1.peak_flops;
+    double s2 = c2.peak_flops;
+    if (s1 > s2) return 1;
+    if (s1 < s2) return -1;
+    return 0;
+}
+
+void COPROC_ATI::correlate(
+    bool use_all,
+    vector<int>& ignore_devs
+) {
+    char buf[256];
+
+    if (!ati_gpus.size()) return;
+
+    // find the most capable non-ignored instance
+    //
+    bool first = true;
+    unsigned int i;
+    for (i=0; i<ati_gpus.size(); i++) {
+        if (in_vector(ati_gpus[i].device_num, ignore_devs)) continue;
+        if (first) {
+            *this = ati_gpus[i];
+            first = false;
+        } else if (ati_compare(ati_gpus[i], *this, false) > 0) {
+            *this = ati_gpus[i];
+        }
+    }
+
+    // see which other instances are equivalent,
+    // and set the "count" and "device_nums" fields
+    //
+    count = 0;
+    for (i=0; i<ati_gpus.size(); i++) {
+        ati_gpus[i].description(buf, sizeof(buf));
+        if (in_vector(ati_gpus[i].device_num, ignore_devs)) {
+            ati_gpus[i].is_used = COPROC_IGNORED;
+        } else if (this->have_opencl && !ati_gpus[i].have_opencl) {
+            ati_gpus[i].is_used = COPROC_UNUSED;
+        } else if (this->have_cal && !ati_gpus[i].have_cal) {
+            ati_gpus[i].is_used = COPROC_UNUSED;
+        } else if (this->have_hip && !ati_gpus[i].have_hip) {
+            ati_gpus[i].is_used = COPROC_UNUSED;
+        } else if (use_all || !ati_compare(ati_gpus[i], *this, true)) {
+            device_nums[count] = ati_gpus[i].device_num;
+            count++;
+            ati_gpus[i].is_used = COPROC_USED;
+        } else {
+            ati_gpus[i].is_used = COPROC_UNUSED;
+        }
+    }
+}
+
 void COPROC_ATI::get_hip(vector<string>& warnings) {
     char buf[256];
     string s;
@@ -347,7 +410,13 @@ void COPROC_ATI::get_hip(vector<string>& warnings) {
                 cc.gfxip_major = gfx_target / 10000;
                 cc.gfxip_minor = (gfx_target / 100) % 100;
                 gfx_target_to_string(gfx_target, cc.gcn_arch, sizeof(cc.gcn_arch));
-                if (simd_count && wave_front) {
+                // Only wave32 maps cleanly: SIMD count x wavefront size is
+                // the FP32 lane count.  For wave64 (GCN/CDNA) the SIMD
+                // count is the number of 16/32-lane units, so the product
+                // is not the lane count; set_peak_flops() derives it from
+                // the CU count instead.
+                //
+                if (simd_count && wave_front == 32) {
                     cc.hip_lane_count = simd_count * wave_front;
                 }
                 if (!cc.hip_cu_count && cc.hip_lane_count) {
