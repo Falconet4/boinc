@@ -38,7 +38,9 @@
 #include <mach-o/dyld.h>
 #endif
 #include <unistd.h>
+#include <fcntl.h>
 #include <sys/types.h>
+#include <sys/stat.h>
 #include <signal.h>
 #include <sys/time.h>
 #include <sys/wait.h>
@@ -261,20 +263,134 @@ int run_program(
     return 0;
 }
 #else
+// environ is declared here rather than in a header: it is provided by
+// the C runtime, and the standard headers that expose it differ by
+// platform.  This file-local declaration keeps the dependency explicit.
+//
+extern char** environ;
+
+// Resolve a program name through PATH before fork()ing.  The child of a
+// fork() in a multithreaded process may only call async-signal-safe
+// functions; execve() is, execvp()/execlp() are not.
+//
+// If dir is given, relative names are resolved against it, matching the
+// child's chdir().
+//
+int boinc_resolve_exe(
+    const char* name, char* out, size_t out_size, const char* dir
+) {
+    if (!name || !name[0] || !out_size) {
+        errno = EINVAL;
+        return -1;
+    }
+
+    // run_program()'s child chdir()s into dir before exec.  Resolve
+    // relative names against an absolute form of dir, or the relative
+    // result would be applied twice.
+    //
+    char dirbuf[4096];
+    if (dir && !dir[0]) dir = NULL;
+    if (dir && dir[0] != '/') {
+        char cwd[4096];
+        if (!getcwd(cwd, sizeof(cwd))) return -1;
+        int wrote = snprintf(dirbuf, sizeof(dirbuf), "%s/%s", cwd, dir);
+        if (wrote < 0 || (size_t)wrote >= sizeof(dirbuf)) {
+            errno = ENAMETOOLONG;
+            return -1;
+        }
+        dir = dirbuf;
+    }
+
+    int wrote;
+    if (strchr(name, '/')) {
+        if (dir && name[0] != '/') {
+            wrote = snprintf(out, out_size, "%s/%s", dir, name);
+        } else {
+            wrote = snprintf(out, out_size, "%s", name);
+        }
+        if (wrote < 0 || (size_t)wrote >= out_size) {
+            errno = ENAMETOOLONG;
+            return -1;
+        }
+        return 0;
+    }
+    const char* path = getenv("PATH");
+    if (!path) {
+        path = "/usr/local/bin:/usr/bin:/bin";
+    }
+    while (1) {
+        const char* colon = strchr(path, ':');
+        size_t n = colon ? (size_t)(colon - path) : strlen(path);
+        if (n == 0) {
+            // an empty PATH entry means the current directory
+            if (dir) {
+                wrote = snprintf(out, out_size, "%s/%s", dir, name);
+            } else {
+                wrote = snprintf(out, out_size, "./%s", name);
+            }
+        } else if (path[0] == '/' || !dir) {
+            wrote = snprintf(out, out_size, "%.*s/%s", (int)n, path, name);
+        } else {
+            wrote = snprintf(out, out_size, "%s/%.*s/%s",
+                dir, (int)n, path, name
+            );
+        }
+        if (wrote < 0 || (size_t)wrote >= out_size) {
+            errno = ENAMETOOLONG;
+            return -1;
+        }
+        // access() uses the real UID; execve() checks the effective UID.
+        // They differ when the client is setuid (the generic installer
+        // uses that), so prefer the effective-ID check where the platform
+        // provides it.
+        //
+#ifdef AT_EACCESS
+        int executable = (faccessat(AT_FDCWD, out, X_OK, AT_EACCESS) == 0);
+#else
+        int executable = (access(out, X_OK) == 0);
+#endif
+        if (executable) {
+            // execvp() keeps searching when execve() fails with EACCES,
+            // so a directory named like the program must not shadow a
+            // later entry.
+            //
+            struct stat sb;
+            if (stat(out, &sb) == 0 && !S_ISDIR(sb.st_mode)) return 0;
+        }
+        if (!colon) break;
+        path = colon + 1;
+    }
+    errno = ENOENT;
+    return -1;
+}
+
 int run_program(
     const char* dir, const char* file, int , char *const argv[], int& id
 ) {
-    int retval;
+    char exe[4096];
+    bool resolved = (boinc_resolve_exe(file, exe, sizeof(exe), dir) == 0);
     int pid = fork();
+    if (pid < 0) {
+        // Report the failure rather than handing back id = -1, which callers
+        // store and later signal or wait on.
+        //
+        id = 0;
+        return ERR_FORK;
+    }
     if (pid == 0) {
-        if (dir) {
-            retval = chdir(dir);
-            if (retval) return retval;
+        if (dir && dir[0]) {
+            if (chdir(dir)) _exit(errno);
         }
-        execvp(file, argv);
-        boinc::perror("execvp");
-        boinc::fprintf(stderr, "couldn't exec %s: %d\n", file, errno);
-        exit(errno);
+        execve(resolved ? exe : file, argv, environ);
+        // Only async-signal-safe calls are allowed here; report the
+        // failure with write() rather than stdio.
+        //
+        int e = errno;
+        const char msg[] = "run_program: exec failed\n";
+        if (write(2, msg, sizeof(msg)-1) < 0) {
+            // nothing more we can do
+        }
+        _exit(e);
     }
     id = pid;
     return 0;

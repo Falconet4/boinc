@@ -106,6 +106,17 @@ extern int run_program(
     PROCESS_REF&             // ID of child process
 );
 
+#ifndef _WIN32
+// Resolve a program name through PATH.  A process that fork()s must pass
+// the resolved path to execve(), which is async-signal-safe; the
+// execvp()/execlp() family is not, because it searches PATH with
+// malloc and locks.
+//
+extern int boinc_resolve_exe(
+    const char* name, char* out, size_t out_size, const char* dir = NULL
+);
+#endif
+
 #ifdef _WIN32
 // run program, return handles to read and write to it
 //
