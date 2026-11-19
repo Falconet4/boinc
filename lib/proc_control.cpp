@@ -27,6 +27,13 @@
 #include <sys/time.h>
 #include <sys/resource.h>
 #include <unistd.h>
+#include <cerrno>
+
+#if defined(__APPLE__) || defined(__FreeBSD__)
+#include <sys/sysctl.h>
+#include <sys/proc.h>
+#include <sys/user.h>
+#endif
 
 #if HAVE_CSIGNAL
 #include <csignal>
@@ -182,10 +189,55 @@ int suspend_or_resume_threads(
 
 #else
 
+// True if the process exists but has already exited and is waiting to be
+// reaped.  Linux reports the state in /proc/<pid>/stat; macOS (and other
+// BSDs) expose it through kinfo_proc, since there is no /proc.
+//
+static bool process_is_zombie(int pid) {
+#if defined(__linux__)
+    char path[64], buf[256];
+    snprintf(path, sizeof(path), "/proc/%d/stat", pid);
+    FILE* f = fopen(path, "r");
+    if (!f) return false;
+    bool zombie = false;
+    if (fgets(buf, sizeof(buf), f)) {
+        const char* p = strrchr(buf, ')');
+        if (p && p[1] == ' ' && p[2] == 'Z') zombie = true;
+    }
+    fclose(f);
+    return zombie;
+#elif defined(__APPLE__)
+    struct kinfo_proc info = {};
+    size_t size = sizeof(info);
+    int mib[4] = {CTL_KERN, KERN_PROC, KERN_PROC_PID, pid};
+    if (sysctl(mib, 4, &info, &size, nullptr, 0) != 0 || size == 0) {
+        return false;
+    }
+    return info.kp_proc.p_stat == SZOMB;
+#elif defined(__FreeBSD__)
+    struct kinfo_proc info = {};
+    size_t size = sizeof(info);
+    int mib[4] = {CTL_KERN, KERN_PROC, KERN_PROC_PID, pid};
+    if (sysctl(mib, 4, &info, &size, nullptr, 0) != 0 || size == 0) {
+        return false;
+    }
+    return info.ki_stat == SZOMB;
+#else
+    (void)pid;
+    return false;
+#endif
+}
+
 bool any_process_exists(vector<int>& pids) {
-    int status;
     for (int pid: pids) {
-        if (waitpid(pid, &status, WNOHANG) >= 0) {
+        // kill(pid, 0) tests for existence without reaping, but it also
+        // succeeds for a zombie (an exited child that has not been
+        // reaped).  Treat those as gone, or kill_descendants() waits the
+        // full grace period for a process that has already exited.
+        //
+        if (process_is_zombie(pid)) continue;
+        errno = 0;
+        if (kill(pid, 0) == 0 || errno == EPERM) {
             return true;
         }
     }
