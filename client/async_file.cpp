@@ -196,7 +196,6 @@ int ASYNC_VERIFY::init(FILE_INFO* _fip) {
         out = boinc_temp_file(dir, "verify", temp_path);
 #endif
         if (!out) {
-            fclose(in);
             return ERR_FOPEN;
         }
 

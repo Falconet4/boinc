@@ -411,7 +411,10 @@ int ACTIVE_TASK::setup_file(
             if (fip->nbytes > ASYNC_FILE_THRESHOLD) {
                 ASYNC_COPY* ac = new ASYNC_COPY;
                 retval = ac->init(this, fip, file_path, link_path);
-                if (retval) return retval;
+                if (retval) {
+                    delete ac;
+                    return retval;
+                }
                 return ERR_IN_PROGRESS;
             } else {
                 retval = boinc_copy(file_path, link_path);
@@ -528,11 +531,11 @@ int ACTIVE_TASK::setup_slot_dir(char *buf, unsigned int buf_len) {
     int retval;
     FILE_INFO *fip;
     char file_path[MAXPATHLEN];
-    char path[1024];
+    char path[MAXPATHLEN];
 
     *buf = 0;
 
-    sprintf(path, "%s/boinc_setup_complete", slot_dir);
+    snprintf(path, sizeof(path), "%s/boinc_setup_complete", slot_dir);
     if (boinc_file_exists(path)) return 0;
 
     // make sure the needed files exist
@@ -603,6 +606,10 @@ int ACTIVE_TASK::setup_slot_dir(char *buf, unsigned int buf_len) {
         // don't check retval here
 
     FILE *f = fopen(path, "w");
+    if (!f) {
+        snprintf(buf, buf_len, "Can't create %s: %s", path, boincerror(errno));
+        return ERR_FOPEN;
+    }
     fclose(f);
     return 0;
 }

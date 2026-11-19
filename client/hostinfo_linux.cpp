@@ -30,6 +30,9 @@
 #if HAVE_UNISTD_H
 #include <unistd.h>
 #endif
+#if defined(__linux__)
+#include <sys/vfs.h>
+#endif
 #endif
 
 #include "str_replace.h"
@@ -193,15 +196,15 @@ bool HOST_INFO::parse_linux_os_info(
     } else {
         if (strlen(dist_name)) {
             safe_strcat(buf2, dist_name);
-            strcat(buf2, " ");
+            safe_strcat(buf2, " ");
         }
         if (strlen(dist_version)) {
             safe_strcat(buf2, dist_version);
-            strcat(buf2, " ");
+            safe_strcat(buf2, " ");
         }
         if (strlen(dist_codename)) {
             safe_strcat(buf2, dist_codename);
-            strcat(buf2, " ");
+            safe_strcat(buf2, " ");
         }
         strip_whitespace(buf2);
     }
@@ -237,18 +240,39 @@ bool HOST_INFO::parse_openwrt_model(
     return true;
 }
 
+// Linux filesystem magic numbers we care about.
+// Defined here to avoid requiring a particular libc header set.
+//
+#ifndef NFS_SUPER_MAGIC
+#define NFS_SUPER_MAGIC 0x6969
+#endif
+#ifndef SMB_SUPER_MAGIC
+#define SMB_SUPER_MAGIC 0x517B
+#endif
+#ifndef CIFS_MAGIC_NUMBER
+#define CIFS_MAGIC_NUMBER 0xFF534D42
+#endif
+#ifndef SMB2_MAGIC_NUMBER
+#define SMB2_MAGIC_NUMBER 0xFE534D42
+#endif
+
 int is_filesystem_remote(const char* path, bool &result) {
-    char cmd[256], buf[256];
-    vector<string> out;
     result = false;
-    sprintf(cmd, "stat --file-system --format=%%T %s", path);
-    int retval = run_command(cmd, out);
-    if (retval) return retval;
-    if (out.empty()) return -1;
-    strcpy(buf, out[0].c_str());
-    strip_whitespace(buf);
-    if (!strcmp(buf, "nfs")) result = true;
-    else if (!strcmp(buf, "nfs4")) result = true;
-    else if (!strcmp(buf, "smb")) result = true;
+#if defined(__linux__)
+    struct statfs fs;
+    if (statfs(path, &fs)) {
+        return -1;
+    }
+    switch ((unsigned long)fs.f_type) {
+    case NFS_SUPER_MAGIC:
+    case SMB_SUPER_MAGIC:
+    case CIFS_MAGIC_NUMBER:
+    case SMB2_MAGIC_NUMBER:
+        result = true;
+        break;
+    }
+#else
+    (void)path;
+#endif
     return 0;
 }

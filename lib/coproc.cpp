@@ -151,10 +151,27 @@ int COPROC::parse(XML_PARSER& xp) {
         if (xp.parse_double("peak_flops", peak_flops)) continue;
         if (xp.parse_str("device_nums", buf, sizeof(buf))) {
             int i=0;
+            bool bad = false;
             char* p = strtok(buf, " ");
             while (p && i<MAX_COPROC_INSTANCES) {
-                device_nums[i++] = atoi(p);
+                char* end;
+                long n = strtol(p, &end, 10);
+                if (end == p || n < 0 || n >= MAX_COPROC_INSTANCES) {
+                    boinc::fprintf(stderr,
+                        "cc_config.xml: device_nums value '%s' out of range; ignoring the list\n",
+                        p
+                    );
+                    bad = true;
+                    break;
+                }
+                device_nums[i++] = (int)n;
                 p = strtok(NULL, " ");
+            }
+            if (bad) {
+                // Do not leave a shifted list: restore the identity mapping.
+                for (int j=0; j<MAX_COPROC_INSTANCES; j++) {
+                    device_nums[j] = j;
+                }
             }
             continue;
         }
