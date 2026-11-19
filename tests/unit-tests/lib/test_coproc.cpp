@@ -121,3 +121,19 @@ TEST(test_coproc, fp64_unknown_arch) {
     EXPECT_FALSE(c.have_fp64);
     EXPECT_DOUBLE_EQ(c.peak_flops_dp, 0.);
 }
+
+// CDNA 2 (MI200) has a 1:1 FP64 rate.
+//
+TEST(test_coproc, fp64_mi200_one_to_one) {
+    COPROC_ATI c;
+    c.clear();
+    c.have_hip = true;
+    c.hip_cu_count = 110;
+    c.hip_warp_size = 64;
+    c.hip_clock_khz = 1700000;
+    c.gfxip_major = 9;
+    c.gfx_target_version = 90010;
+    c.set_peak_flops();
+    EXPECT_DOUBLE_EQ(c.peak_flops, 110. * 64. * 2. * 1.7e9);
+    EXPECT_DOUBLE_EQ(c.peak_flops_dp, c.peak_flops);
+}

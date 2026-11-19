@@ -15,6 +15,17 @@
         <gpu_peak_flops_scale>  .2          </gpu_peak_flops_scale>
         <cpu_frac>              .1          </cpu_frac>
     </plan_class>
+    <!-- Optional FP64 selection.  With neither option set, FP64 work is
+         sent to any GPU, as before.  require_fp64 accepts any GPU that
+         reports FP64 support; min_gpu_dp_flops additionally requires a
+         minimum estimated FP64 peak.
+    <plan_class>
+        <name>                  fp64        </name>
+        <gpu_type>              amd         </gpu_type>
+        <require_fp64/>
+        <min_gpu_dp_flops>      1e12        </min_gpu_dp_flops>
+    </plan_class>
+    -->
     <plan_class>
         <name>                  ati14       </name>
         <gpu_type>              amd         </gpu_type>

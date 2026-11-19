@@ -1041,6 +1041,31 @@ bool PLAN_CLASS_SPEC::check(
     //
     if (cpp) {
 
+        // Double precision.  A plan class that sets neither option accepts
+        // every GPU, as before; require_fp64 accepts any GPU that reports
+        // FP64 support; min_gpu_dp_flops additionally requires a minimum
+        // estimated FP64 peak.
+        //
+        if (require_fp64 && !cpp->have_fp64) {
+            if (config.debug_version_select) {
+                log_messages.printf(MSG_NORMAL,
+                    "[version] plan_class_spec: GPU does not report FP64 support\n"
+                );
+            }
+            return false;
+        }
+        if (min_gpu_dp_flops > 0) {
+            if (!cpp->have_fp64 || cpp->peak_flops_dp < min_gpu_dp_flops) {
+                if (config.debug_version_select) {
+                    log_messages.printf(MSG_NORMAL,
+                        "[version] plan_class_spec: FP64 peak required min: %f, supplied: %f\n",
+                        min_gpu_dp_flops, cpp->peak_flops_dp
+                    );
+                }
+                return false;
+            }
+        }
+
         // GPU RAM
         //
         if (min_gpu_ram_mb && min_gpu_ram_mb * MEGA > gpu_ram) {
@@ -1347,6 +1372,9 @@ int PLAN_CLASS_SPEC::parse(XML_PARSER& xp) {
         if (xp.parse_int("min_cal_target", min_cal_target)) continue;
         if (xp.parse_int("max_cal_target", max_cal_target)) continue;
 
+        if (xp.parse_bool("require_fp64", require_fp64)) continue;
+        if (xp.parse_double("min_gpu_dp_flops", min_gpu_dp_flops)) continue;
+
         if (xp.parse_int("min_nvidia_compcap", min_nvidia_compcap)) continue;
         if (xp.parse_int("max_nvidia_compcap", max_nvidia_compcap)) continue;
 
@@ -1469,6 +1497,9 @@ PLAN_CLASS_SPEC::PLAN_CLASS_SPEC() {
     min_cal_target = 0;
     max_cal_target = 0;
     without_opencl = false;
+
+    require_fp64 = false;
+    min_gpu_dp_flops = 0;
 
     min_nvidia_compcap = 0;
     max_nvidia_compcap = 0;
