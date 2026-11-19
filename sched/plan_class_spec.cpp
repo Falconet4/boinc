@@ -884,6 +884,10 @@ bool PLAN_CLASS_SPEC::check(
             }
         }
 
+        // AMD driver version.  Only CAL reported one; HIP and OpenCL don't,
+        // and CAL is gone, so this is normally 0 and the min/max driver
+        // checks below are skipped.
+        //
         driver_version = 0;
         if (cp.have_cal) {
             int major, minor, release, scanned;
@@ -891,7 +895,7 @@ bool PLAN_CLASS_SPEC::check(
             if (scanned != 3) {
                 if (config.debug_version_select) {
                     log_messages.printf(MSG_NORMAL,
-                        "[version] plan_class_spec: driver version '%s' couldn't be parsed\n",
+                        "[version] plan_class_spec: CAL version '%s' couldn't be parsed\n",
                         cp.version
                     );
                 }
@@ -902,7 +906,8 @@ bool PLAN_CLASS_SPEC::check(
         } else {
             if (config.debug_version_select) {
                 log_messages.printf(MSG_NORMAL,
-                    "[version] plan_class_spec: no CAL, driver version couldn't be determined\n"
+                    "[version] plan_class_spec: no AMD driver version available; "
+                    "driver-version requirements are not checked\n"
                 );
             }
         }
