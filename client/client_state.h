@@ -27,6 +27,7 @@
 #include <string>
 #include <vector>
 #include <ctime>
+#include <signal.h>
 #endif
 
 using std::string;
@@ -124,7 +125,7 @@ struct CLIENT_STATE {
     bool user_active;       // there has been recent mouse/kbd input
     int cmdline_gui_rpc_port;
     bool show_projects;
-    bool requested_exit;
+    volatile sig_atomic_t requested_exit;
         // we should exit now.  Set when
         // - got a "quit" GUI RPC
         // - (Unix) got a HUP, INT, QUIT, TERM, or PWR signal

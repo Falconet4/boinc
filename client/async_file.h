@@ -78,7 +78,7 @@ struct ASYNC_VERIFY {
       safe_strcpy(temp_path, "");
       safe_strcpy(outpath, "");
     };
-    ~ASYNC_VERIFY(){};
+    ~ASYNC_VERIFY();
 
     int init(FILE_INFO*);
     int verify_chunk();

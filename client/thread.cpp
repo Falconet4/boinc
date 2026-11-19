@@ -23,16 +23,28 @@
 
 #ifdef _WIN32
 int THREAD::run(LPTHREAD_START_ROUTINE func, void* _arg) {
-    CreateThread(NULL, 0, func, this, 0, NULL);
+    // Publish the argument before the thread can run.
+    arg = _arg;
+    HANDLE h = CreateThread(NULL, 0, func, this, 0, NULL);
+    if (!h) return (int)GetLastError();
+    CloseHandle(h);
 #else
 int THREAD::run(void*(*func)(void*), void* _arg) {
     pthread_t id;
     pthread_attr_t thread_attrs;
-    pthread_attr_init(&thread_attrs);
-    int retval = pthread_create(&id, &thread_attrs, func, this);
-    if (retval) return retval;
-#endif
+
+    // Publish the argument before the thread can run.
     arg = _arg;
+
+    int retval = pthread_attr_init(&thread_attrs);
+    if (retval) return retval;
+    retval = pthread_create(&id, &thread_attrs, func, this);
+    pthread_attr_destroy(&thread_attrs);
+    if (retval) return retval;
+    // Nothing joins these threads; release their resources on exit.
+    //
+    pthread_detach(id);
+#endif
     return 0;
 }
 

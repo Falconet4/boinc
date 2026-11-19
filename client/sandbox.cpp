@@ -78,12 +78,18 @@ int switcher_exec(const char *util_filename, const char* cmdline) {
 
     if (pipe(fds_err) == -1) {
         perror("pipe() for fds_err failed in switcher_exec");
+        close(fds_out[0]);
+        close(fds_out[1]);
         return ERR_PIPE;
     }
 
     int pid = fork();
     if (pid == -1) {
         perror("fork() failed in switcher_exec");
+        close(fds_out[0]);
+        close(fds_out[1]);
+        close(fds_err[0]);
+        close(fds_err[1]);
         return ERR_FORK;
     }
     if (pid == 0) {
