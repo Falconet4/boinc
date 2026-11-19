@@ -387,7 +387,7 @@ void COPROCS::write_xml(MIOFILE& mf, bool scheduler_rpc) {
 #endif
 
 void COPROC_NVIDIA::description(char* buf, int buflen) {
-    char vers[256], cuda_vers[256];
+    char vers[256], cuda_vers[256], dp[64];
     if (display_driver_version) {
 #ifdef __APPLE__
      	int maj = display_driver_version >> 16;
@@ -409,11 +409,18 @@ void COPROC_NVIDIA::description(char* buf, int buflen) {
     } else {
         safe_strcpy(cuda_vers, "unknown");
     }
+    if (peak_flops_dp > 0) {
+        snprintf(dp, sizeof(dp), ", %s FP64",
+            flops_to_string(peak_flops_dp).c_str()
+        );
+    } else {
+        dp[0] = 0;
+    }
     snprintf(buf, buflen,
-        "%s (driver version %s, CUDA version %s, compute capability %d.%d, %.2fGB, %.2fGB available, %s peak)",
+        "%s (driver version %s, CUDA version %s, compute capability %d.%d, %.2fGB, %.2fGB available, %s peak%s)",
         cuda_prop.name, vers, cuda_vers, cuda_prop.major, cuda_prop.minor,
         cuda_prop.totalGlobalMem/GIGA, available_ram/GIGA,
-        flops_to_string(peak_flops).c_str()
+        flops_to_string(peak_flops).c_str(), dp
     );
 }
 
@@ -638,7 +645,8 @@ static double nvidia_fp64_ratio(int major, int minor) {
     case 9:  return 1./2.;                  // Hopper
     case 8:  return (minor == 0) ? 1./2. : 1./64.;
     case 7:  return (minor == 0) ? 1./2. : 1./32.;
-    case 6:  return (minor == 2) ? 1./2. : 1./32.;
+    case 6:  return (minor == 0 || minor == 1) ? 1./2. : 1./32.;
+        // cc6.0 (P100) and cc6.1 are 1:2; cc6.2 (P40/P4) is 1:32
     default: return 0.;
     }
 }
@@ -1204,8 +1212,12 @@ void COPROC_INTEL::write_xml(MIOFILE& f, bool scheduler_rpc) {
         write_request(f);
     }
     f.printf(
-        "   <peak_flops>%f</peak_flops>\n",
-        peak_flops
+        "   <peak_flops>%f</peak_flops>\n"
+        "   <peak_flops_dp>%f</peak_flops_dp>\n"
+        "   <have_fp64>%d</have_fp64>\n",
+        peak_flops,
+        peak_flops_dp,
+        have_fp64 ? 1 : 0
     );
 
     if (have_opencl) {
@@ -1242,6 +1254,8 @@ int COPROC_INTEL::parse(XML_PARSER& xp) {
         }
         if (xp.parse_int("count", count)) continue;
         if (xp.parse_double("peak_flops", peak_flops)) continue;
+        if (xp.parse_double("peak_flops_dp", peak_flops_dp)) continue;
+        if (xp.parse_bool("have_fp64", have_fp64)) continue;
         if (xp.parse_bool("have_opencl", have_opencl)) continue;
         if (xp.parse_double("available_ram", available_ram)) continue;
         if (xp.parse_double("req_secs", req_secs)) continue;
@@ -1271,6 +1285,12 @@ void COPROC_INTEL::set_peak_flops() {
         x = opencl_prop.max_compute_units * 8 * opencl_prop.max_clock_frequency * 1e6;
     }
     peak_flops = x;
+    // Intel OpenCL can report whether FP64 is present, but there is no
+    // reliable generic FP64-to-FP32 ratio.  Report capability, not a
+    // fabricated peak.
+    //
+    peak_flops_dp = 0;
+    have_fp64 = (opencl_prop.double_fp_config != 0);
 }
 
 void COPROC_INTEL::fake(double ram, double avail_ram, int n) {
