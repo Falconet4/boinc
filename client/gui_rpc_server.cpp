@@ -261,17 +261,41 @@ int GUI_RPC_CONN_SET::init_unix_domain() {
 #ifdef __APPLE__
     addr.sun_len = sizeof(addr);
 #endif
-    strcpy(addr.sun_path, GUI_RPC_FILE);
-    socklen_t len = offsetof(sockaddr_un, sun_path) + strlen(GUI_RPC_FILE);
+    // Bind to a private temporary path and rename it into place.
+    // unlink() followed by bind() leaves a window in which another
+    // process (the data dir is group-writable) can create a file or
+    // symlink at GUI_RPC_FILE.
+    //
+    char tmp_path[sizeof(addr.sun_path)];
+    snprintf(tmp_path, sizeof(tmp_path), "%s.tmp.%d",
+        GUI_RPC_FILE, (int)getpid()
+    );
+    strlcpy(addr.sun_path, tmp_path, sizeof(addr.sun_path));
+    socklen_t len = offsetof(sockaddr_un, sun_path) + strlen(tmp_path);
 #endif
-    unlink(GUI_RPC_FILE);
+#ifndef ANDROID
+    unlink(tmp_path);
+#endif
     if (bind(lsock, (struct sockaddr*)&addr, len) < 0) {
         msg_printf(NULL, MSG_INTERNAL_ERROR,
             "Failed to bind Unix domain socket"
         );
         boinc_close_socket(lsock);
+#ifndef ANDROID
+        unlink(tmp_path);
+#endif
         return ERR_BIND;
     }
+#ifndef ANDROID
+    if (rename(tmp_path, GUI_RPC_FILE)) {
+        msg_printf(NULL, MSG_INTERNAL_ERROR,
+            "Failed to rename Unix domain socket"
+        );
+        boinc_close_socket(lsock);
+        unlink(tmp_path);
+        return ERR_RENAME;
+    }
+#endif
     retval = listen(lsock, 999);
     if (retval < 0) {
         msg_printf(NULL, MSG_INTERNAL_ERROR,

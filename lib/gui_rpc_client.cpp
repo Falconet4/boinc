@@ -112,7 +112,10 @@ int RPC_CLIENT::get_ip_addr(const char* host, int port) {
 int RPC_CLIENT::init(const char* host, int port) {
     int retval = get_ip_addr(host, port);
     if (retval) return retval;
-    boinc_socket(sock, AF_INET);
+    // get_ip_addr() may have resolved an IPv6 address; the socket family
+    // must match the sockaddr_storage it filled in.
+    //
+    boinc_socket(sock, addr.ss_family ? addr.ss_family : AF_INET);
 
     // set up receive timeout; avoid hang if client doesn't respond
     //
@@ -121,11 +124,17 @@ int RPC_CLIENT::init(const char* host, int port) {
     if (setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (char *)&dwTime,  sizeof dwTime)) {
         // not fatal
     }
+    if (setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, (char *)&dwTime,  sizeof dwTime)) {
+        // not fatal
+    }
 #else
     struct timeval tv;
     tv.tv_sec = 30;
     tv.tv_usec = 0;
     if (setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (char *)&tv,  sizeof tv)) {
+        // not fatal
+    }
+    if (setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, (char *)&tv,  sizeof tv)) {
         // not fatal
     }
 #endif
@@ -153,7 +162,7 @@ int RPC_CLIENT::init_asynch(
     retval = get_ip_addr(host, port);
     if (retval) return retval;
 
-    retval = boinc_socket(sock, AF_INET);
+    retval = boinc_socket(sock, addr.ss_family ? addr.ss_family : AF_INET);
     BOINCTRACE("init_asynch() boinc_socket: %d\n", sock);
     if (retval) return retval;
 
@@ -214,7 +223,9 @@ int RPC_CLIENT::init_poll() {
     if (retval) {
         if (retry) {
             boinc_close_socket(sock);
-            retval = boinc_socket(sock, AF_INET);
+            retval = boinc_socket(
+                sock, addr.ss_family ? addr.ss_family : AF_INET
+            );
             retval = boinc_socket_asynch(sock, true);
             retval = connect(sock, (const sockaddr*)(&addr), addr_len(addr));
             BOINCTRACE("init_poll(): retrying connect: %d\n", retval);
@@ -291,31 +302,89 @@ int RPC_CLIENT::authorize(const char* passwd) {
     return ERR_AUTHENTICATOR;
 }
 
+// True if a failed send()/recv() was interrupted by a signal and must be
+// retried.  POSIX reports EINTR through errno; Winsock reports through
+// WSAGetLastError(), and errno there may hold an unrelated stale value.
+//
+static bool socket_call_interrupted() {
+#ifdef _WIN32
+    return WSAGetLastError() == WSAEINTR;
+#else
+    return errno == EINTR;
+#endif
+}
+
+// A signal arriving during a blocking socket call must not abort the RPC,
+// but a stream of signals must not defeat SO_SNDTIMEO/SO_RCVTIMEO either:
+// give up after this many consecutive interruptions with no progress.
+//
+#define MAX_EINTR_RETRIES 100
+
 int RPC_CLIENT::send_request(const char* p) {
     string buf;
     buf = "<boinc_gui_rpc_request>\n";
     buf += p;
     buf += "</boinc_gui_rpc_request>\n\003";
-    int n = (int)send(sock, buf.c_str(), (int)buf.size(), 0);
-    if (n < 0) {
-        //printf("send: %d\n", n);
-        //perror("send");
-        return ERR_WRITE;
+
+    // A short send() is normal for large requests (preference overrides,
+    // cc_config); loop until everything is written.
+    //
+    size_t sent = 0;
+    int interruptions = 0;
+    while (sent < buf.size()) {
+        int n = (int)send(sock, buf.c_str()+sent, (int)(buf.size()-sent), 0);
+        if (n < 0) {
+            if (socket_call_interrupted()) {
+                if (++interruptions > MAX_EINTR_RETRIES) return ERR_WRITE;
+                continue;
+            }
+            //printf("send: %d\n", n);
+            //perror("send");
+            return ERR_WRITE;
+        }
+        if (n == 0) {
+            // The peer closed the connection.
+            return ERR_WRITE;
+        }
+        interruptions = 0;
+        sent += n;
     }
     return 0;
 }
 
 // get reply from server.  Caller must free buf
 //
+// Sanity bound for a GUI RPC reply; the core client's state is a few MB.
+//
+#define MAX_GUI_RPC_REPLY_SIZE (64*1024*1024)
+
 int RPC_CLIENT::get_reply(char*& mbuf) {
     char buf[8193];
     MFILE mf;
     int n;
+    size_t total = 0;
 
     mf.puts("");    // make sure buffer is non-NULL
+    int interruptions = 0;
     while (1) {
         n = (int) recv(sock, buf, 8192, 0);
-        if (n <= 0) return ERR_READ;
+        if (n < 0) {
+            // A signal delivered during recv() must not abort the reply.
+            if (socket_call_interrupted()) {
+                if (++interruptions > MAX_EINTR_RETRIES) return ERR_READ;
+                continue;
+            }
+            return ERR_READ;
+        }
+        if (n == 0) {
+            // The peer closed the connection before sending the terminator.
+            return ERR_READ;
+        }
+        interruptions = 0;
+        total += n;
+        if (total > MAX_GUI_RPC_REPLY_SIZE) {
+            return ERR_BUFFER_OVERFLOW;
+        }
         buf[n]=0;
         mf.puts(buf);
         if (strchr(buf, '\003')) break;

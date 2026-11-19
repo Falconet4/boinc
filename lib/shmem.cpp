@@ -314,7 +314,13 @@ int create_shmem_mmap(const char *path, size_t size, void** pp) {
     // it's a big headache for anyone it affects,
     // and it's not a significant security issue.
     //
-    fd = open(path, O_RDWR | O_CREAT, 0666);
+    int flags = O_RDWR | O_CREAT;
+#ifdef O_NOFOLLOW
+    // The path may be in a directory writable by project code; do not
+    // follow a symlink placed there.
+    flags |= O_NOFOLLOW;
+#endif
+    fd = open(path, flags, 0666);
     if (fd < 0) {
         return ERR_OPEN;
     }
@@ -358,7 +364,11 @@ int attach_shmem_mmap(const char *path, void** pp) {
 
     // Return NULL pointer if attach_shmem fails
     *pp = 0;
-    fd = open(path, O_RDWR);
+    int flags = O_RDWR;
+#ifdef O_NOFOLLOW
+    flags |= O_NOFOLLOW;
+#endif
+    fd = open(path, flags);
     if (fd < 0) return ERR_SHMGET;
 
     retval = fstat(fd, &sbuf);

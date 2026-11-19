@@ -164,11 +164,24 @@ int MFILE::close() {
 }
 
 int MFILE::flush() {
-    int n, old_len = len;
+    int old_len = len;
 
-    n = (int)boinc::fwrite(buf, 1, len, f);
+    size_t n = boinc::fwrite(buf, 1, (size_t)len, f);
+    if (n < (size_t)old_len) {
+        // Keep the bytes that were not written.  Clearing len first
+        // (as this used to do) discarded them.  Clear the stream error
+        // flag so a later retry can make progress; without this the
+        // retained bytes could never be flushed.
+        //
+        memmove(buf, buf + n, old_len - (int)n);
+        len = old_len - (int)n;
+        buf[len] = 0;
+#ifndef _USING_FCGI_
+        ::clearerr(f);
+#endif
+        return ERR_FWRITE;
+    }
     len = 0;
-    if (n != old_len) return ERR_FWRITE;
     if (boinc::fflush(f)) return ERR_FFLUSH;
 #ifndef _WIN32
     if (fsync(boinc::fileno(f)) < 0) return ERR_FSYNC;
