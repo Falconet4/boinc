@@ -76,6 +76,7 @@ using std::vector;
 //                    prune J
 
 // can the given task use this GPU instance?  Enforce
+// - the device set the scheduler allowed for this task
 // - GPU exclusions
 // - OpenCL availability (relevant if use_all_gpus set)
 //
@@ -86,10 +87,10 @@ static inline bool gpu_device_allowed(RESULT* rp, COPROC* cp, int i) {
     )) {
         return true;
     }
-    COPROC_DEBUG(msg_printf(rp->project, MSG_INFO,
-        "GPU device %d is not in the server's allowed set for %s",
-        dev, rp->name
-    ));
+    // The task is pinned to other devices.  This is not an error, so it is
+    // not logged every time a slot is examined; a task that matches no
+    // device at all is reported in assign_coprocs().
+    //
     return false;
 }
 
@@ -224,6 +225,50 @@ static inline bool get_fractional_assignment(RESULT* rp, double usage, COPROC* c
     return false;
 }
 
+// Does this host have any of the devices the server allowed for this task?
+//
+static bool gpu_has_allowed_device(RESULT* rp, COPROC* cp) {
+    for (int i=0; i<cp->count; i++) {
+        if (device_num_allowed(
+            rp->gpu_device_nums, rp->n_gpu_device_nums, cp->device_nums[i]
+        )) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// The allowed device numbers as text, for a user-facing message.
+//
+std::string gpu_allowed_devices_string(RESULT* rp) {
+    std::string s;
+    char buf[32];
+    for (int i=0; i<rp->n_gpu_device_nums; i++) {
+        snprintf(buf, sizeof(buf), "%s%d", i?",":"", rp->gpu_device_nums[i]);
+        s += buf;
+    }
+    return s;
+}
+
+// Can this result never run here?  True when the scheduler restricted it
+// to specific GPU devices and none of them exist on this host, which
+// happens if a GPU was removed or the devices were renumbered (driver
+// update, hotplug, a card added) since the task was issued.
+//
+// Returns false when no restriction was sent, and when the host has no
+// devices of that type at all: that is the "missing coprocessor" case,
+// which is reported separately, and a failed detection pass must not be
+// mistaken for "these devices don't exist".
+//
+bool gpu_device_mask_unsatisfiable(RESULT* rp) {
+    if (!rp->n_gpu_device_nums) return false;
+    int rt = rp->resource_usage.rsc_type;
+    if (!rt) return false;
+    COPROC& cp = coprocs.coprocs[rt];
+    if (!cp.count) return false;
+    return !gpu_has_allowed_device(rp, &cp);
+}
+
 static inline bool get_integer_assignment(
     RESULT* rp, double usage, COPROC* cp
 ) {
@@ -288,6 +333,18 @@ static inline bool get_integer_assignment(
             }
             if (n == usage) return true;
         }
+    }
+    // Nothing could be assigned.  If the server pinned this task to a
+    // device this host doesn't have, say so: the task will otherwise just
+    // sit unscheduled with no explanation.
+    //
+    if (rp->n_gpu_device_nums && !gpu_has_allowed_device(rp, cp)) {
+        msg_printf(rp->project, MSG_INFO,
+            "Task %s requires GPU device %s, which this computer doesn't have; "
+            "it will not run here",
+            rp->name, gpu_allowed_devices_string(rp).c_str()
+        );
+        return false;
     }
     if (log_flags.coproc_debug) {
         msg_printf(rp->project, MSG_INFO,
