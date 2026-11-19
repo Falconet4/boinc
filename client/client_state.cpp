@@ -628,7 +628,7 @@ int CLIENT_STATE::init() {
         coprocs.nvidia.fake(18000, 512*MEGA, 490*MEGA, 2);
 #endif
 #if 0
-        msg_printf(NULL, MSG_INFO, "Faking an ATI GPU");
+        msg_printf(NULL, MSG_INFO, "Faking an AMD GPU");
         coprocs.ati.fake(512*MEGA, 256*MEGA, 2);
 #endif
 #if 0
@@ -649,7 +649,7 @@ int CLIENT_STATE::init() {
     }
     if (coprocs.have_ati()) {
         if (rsc_index(GPU_TYPE_ATI)>0) {
-            msg_printf(NULL, MSG_INFO, "ATI GPU info taken from cc_config.xml");
+            msg_printf(NULL, MSG_INFO, "AMD GPU info taken from cc_config.xml");
         } else {
             coprocs.add(coprocs.ati);
         }

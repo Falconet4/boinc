@@ -235,7 +235,7 @@ static bool ati_check(COPROC_ATI& c, HOST_USAGE& hu,
         if (!c.amdrt_detected) {
             if (config.debug_version_select) {
                 log_messages.printf(MSG_NORMAL,
-                    "[version] AMD run time libraries not found\n"
+                    "[version] AMD runtime libraries not found\n"
                 );
             }
             return false;
@@ -244,7 +244,7 @@ static bool ati_check(COPROC_ATI& c, HOST_USAGE& hu,
         if (!c.atirt_detected) {
             if (config.debug_version_select) {
                 log_messages.printf(MSG_NORMAL,
-                    "[version] ATI run time libraries not found\n"
+                    "[version] AMD runtime libraries not found\n"
                 );
             }
             return false;
@@ -296,7 +296,7 @@ static inline bool app_plan_ati(
     COPROC_ATI& c = sreq.coprocs.ati;
     if (!c.count) {
         if (config.debug_version_select) {
-            log_messages.printf(MSG_NORMAL,"[version] Host has no ATI GPUs\n");
+            log_messages.printf(MSG_NORMAL,"[version] Host has no AMD GPUs\n");
         }
         return false;
     }
@@ -757,7 +757,7 @@ static inline bool app_plan_opencl(
         if (!c.count) {
             if (config.debug_version_select) {
                 log_messages.printf(MSG_NORMAL,
-                    "[version] [opencl] HOST has no ATI/AMD GPUs\n"
+                    "[version] [opencl] HOST has no AMD GPUs\n"
                 );
             }
             return false;

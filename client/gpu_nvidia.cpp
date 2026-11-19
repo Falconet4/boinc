@@ -596,8 +596,10 @@ void COPROC_NVIDIA::correlate(
 
     // Report every usable instance individually.  The aggregate below is
     // still used for old clients; the scheduler can target a subset.
+    // detect_gpus() builds this list before correlate() runs; rebuild it
+    // only when the vector was filled directly (e.g. the test harness).
     //
-    devices.clear();
+    if (devices.empty()) {
     for (i=0; i<nvidia_gpus.size(); i++) {
         COPROC_NVIDIA& d = nvidia_gpus[i];
         if (in_vector(d.device_num, ignore_devs)) continue;
@@ -626,6 +628,7 @@ void COPROC_NVIDIA::correlate(
         if (devices.size() < MAX_COPROC_INSTANCES) {
             devices.push_back(g);
         }
+    }
     }
 
     // Include every usable instance, not only the equivalent ones.  The
