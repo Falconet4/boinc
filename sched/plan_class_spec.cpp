@@ -335,7 +335,7 @@ bool PLAN_CLASS_SPEC::check(
 
     // OS version
     //
-    if (have_os_regex && regexec(&(os_regex), sreq.host.os_version, 0, NULL, 0)) {
+    if (os_regex.is_set() && regexec(os_regex.get(), sreq.host.os_version, 0, NULL, 0)) {
         if (config.debug_version_select) {
             log_messages.printf(MSG_NORMAL,
                 "[version] plan_class_spec: OS version '%s' didn't match regexp\n",
@@ -423,7 +423,7 @@ bool PLAN_CLASS_SPEC::check(
 
     // CPU vendor and model
     //
-    if (have_cpu_vendor_regex && regexec(&(cpu_vendor_regex), sreq.host.p_vendor, 0, NULL, 0)) {
+    if (cpu_vendor_regex.is_set() && regexec(cpu_vendor_regex.get(), sreq.host.p_vendor, 0, NULL, 0)) {
         if (config.debug_version_select) {
             log_messages.printf(MSG_NORMAL,
                 "[version] plan_class_spec: CPU vendor '%s' didn't match regexp\n",
@@ -433,7 +433,7 @@ bool PLAN_CLASS_SPEC::check(
         return false;
     }
 
-    if (have_cpu_model_regex && regexec(&(cpu_model_regex), sreq.host.p_model, 0, NULL, 0)) {
+    if (cpu_model_regex.is_set() && regexec(cpu_model_regex.get(), sreq.host.p_model, 0, NULL, 0)) {
         if (config.debug_version_select) {
             log_messages.printf(MSG_NORMAL,
                 "[version] plan_class_spec: CPU model '%s' didn't match regexp\n",
@@ -637,7 +637,7 @@ bool PLAN_CLASS_SPEC::check(
 
     // project-specific preference
     //
-    if (have_project_prefs_regex && strlen(project_prefs_tag)) {
+    if (project_prefs_regex.is_set() && strlen(project_prefs_tag)) {
         char tag[256], value[256];
         char buf[65536];
         extract_venue(
@@ -651,7 +651,7 @@ bool PLAN_CLASS_SPEC::check(
                 project_prefs_tag, p?"true":"false"
             );
         }
-        if (p ? regexec(&(project_prefs_regex), value, 0, NULL, 0) : !project_prefs_default_true) {
+        if (p ? regexec(project_prefs_regex.get(), value, 0, NULL, 0) : !project_prefs_default_true) {
             if (config.debug_version_select) {
                 log_messages.printf(MSG_NORMAL,
                     "[version] plan_class_spec: project prefs setting '%s' value='%s' prevents using plan class.\n",
@@ -949,9 +949,9 @@ bool PLAN_CLASS_SPEC::check(
 
     // other (OpenCL) GPU type
     //
-    } else if (have_gpu_type_regex) {
+    } else if (gpu_type_regex.is_set()) {
         for (int i=1; i<sreq.coprocs.n_rsc; i++) {
-            if (!regexec(&(gpu_type_regex), sreq.coprocs.coprocs[i].type, 0, NULL, 0)) {
+            if (!regexec(gpu_type_regex.get(), sreq.coprocs.coprocs[i].type, 0, NULL, 0)) {
                 cpp = &sreq.coprocs.coprocs[i];
                 break;
             }
@@ -1040,6 +1040,47 @@ bool PLAN_CLASS_SPEC::check(
     // general GPU
     //
     if (cpp) {
+
+        // HIP.  This is an AMD API, so it applies only to the AMD/ATI
+        // resource.  An opt-in plan class can require HIP support or a
+        // minimum HIP runtime version without introducing a new resource
+        // type or breaking existing AMD plan classes.
+        //
+        if (require_hip || min_hip_version || gcn_arch_regex.is_set()) {
+            if (cpp != &sreq.coprocs.ati || !sreq.coprocs.ati.have_hip) {
+                if (config.debug_version_select) {
+                    log_messages.printf(MSG_NORMAL,
+                        "[version] plan_class_spec: GPU does not support HIP\n"
+                    );
+                }
+                return false;
+            }
+            if (min_hip_version && sreq.coprocs.ati.hip_version < min_hip_version) {
+                if (config.debug_version_select) {
+                    char min_ver[32], supplied_ver[32];
+                    format_hip_version(min_hip_version, min_ver, sizeof(min_ver));
+                    format_hip_version(sreq.coprocs.ati.hip_version,
+                        supplied_ver, sizeof(supplied_ver));
+                    log_messages.printf(MSG_NORMAL,
+                        "[version] plan_class_spec: HIP version required min: %s, supplied: %s\n",
+                        min_ver, supplied_ver
+                    );
+                }
+                return false;
+            }
+            if (gcn_arch_regex.is_set()
+                && (!sreq.coprocs.ati.gcn_arch[0]
+                    || regexec(gcn_arch_regex.get(), sreq.coprocs.ati.gcn_arch, 0, NULL, 0))
+            ) {
+                if (config.debug_version_select) {
+                    log_messages.printf(MSG_NORMAL,
+                        "[version] plan_class_spec: gcn_arch does not match regex: %s\n",
+                        sreq.coprocs.ati.gcn_arch
+                    );
+                }
+                return false;
+            }
+        }
 
         // Double precision.  A plan class that sets neither option accepts
         // every GPU, as before; require_fp64 accepts any GPU that reports
@@ -1310,27 +1351,24 @@ int PLAN_CLASS_SPEC::parse(XML_PARSER& xp) {
         if (xp.parse_bool("nthreads_cmdline", nthreads_cmdline)) continue;
         if (xp.parse_double("projected_flops_scale", projected_flops_scale)) continue;
         if (xp.parse_str("os_regex", buf, sizeof(buf))) {
-            if (regcomp(&(os_regex), buf, REG_EXTENDED|REG_NOSUB) ) {
+            if (os_regex.compile(buf, REG_EXTENDED|REG_NOSUB) ) {
                 log_messages.printf(MSG_CRITICAL, "BAD OS REGEXP: %s\n", buf);
                 return ERR_XML_PARSE;
             }
-            have_os_regex = true;
             continue;
         }
         if (xp.parse_str("cpu_vendor_regex", buf, sizeof(buf))) {
-            if (regcomp(&(cpu_vendor_regex), buf, REG_EXTENDED|REG_NOSUB) ) {
+            if (cpu_vendor_regex.compile(buf, REG_EXTENDED|REG_NOSUB) ) {
                 log_messages.printf(MSG_CRITICAL, "BAD CPU VENDOR REGEXP: %s\n", buf);
                 return ERR_XML_PARSE;
             }
-            have_cpu_vendor_regex = true;
             continue;
         }
         if (xp.parse_str("cpu_model_regex", buf, sizeof(buf))) {
-            if (regcomp(&(cpu_model_regex), buf, REG_EXTENDED|REG_NOSUB) ) {
+            if (cpu_model_regex.compile(buf, REG_EXTENDED|REG_NOSUB) ) {
                 log_messages.printf(MSG_CRITICAL, "BAD CPU MODEL REGEXP: %s\n", buf);
                 return ERR_XML_PARSE;
             }
-            have_cpu_model_regex = true;
             continue;
         }
         if (xp.parse_int("user_id", user_id)) continue;
@@ -1342,11 +1380,10 @@ int PLAN_CLASS_SPEC::parse(XML_PARSER& xp) {
         if (xp.parse_int("min_libc_version", min_libc_version)) continue;
         if (xp.parse_str("project_prefs_tag", project_prefs_tag, sizeof(project_prefs_tag))) continue;
         if (xp.parse_str("project_prefs_regex", buf, sizeof(buf))) {
-            if (regcomp(&(project_prefs_regex), buf, REG_EXTENDED|REG_NOSUB) ) {
+            if (project_prefs_regex.compile(buf, REG_EXTENDED|REG_NOSUB) ) {
                 log_messages.printf(MSG_CRITICAL, "BAD PROJECT PREFS REGEXP: %s\n", buf);
                 return ERR_XML_PARSE;
             }
-            have_project_prefs_regex = true;
             continue;
         }
         if (xp.parse_bool("project_prefs_default_true", project_prefs_default_true)) continue;
@@ -1371,6 +1408,17 @@ int PLAN_CLASS_SPEC::parse(XML_PARSER& xp) {
         if (xp.parse_bool("without_opencl", without_opencl)) continue;
         if (xp.parse_int("min_cal_target", min_cal_target)) continue;
         if (xp.parse_int("max_cal_target", max_cal_target)) continue;
+        if (xp.parse_bool("require_hip", require_hip)) continue;
+        if (xp.parse_int("min_hip_version", min_hip_version)) continue;
+        if (xp.parse_str("gcn_arch_regex", buf, sizeof(buf))) {
+            if (gcn_arch_regex.compile(buf, REG_EXTENDED|REG_NOSUB)) {
+                log_messages.printf(MSG_CRITICAL,
+                    "BAD GCN ARCH REGEXP: %s\n", buf
+                );
+                return ERR_XML_PARSE;
+            }
+            continue;
+        }
 
         if (xp.parse_bool("require_fp64", require_fp64)) continue;
         if (xp.parse_double("min_gpu_dp_flops", min_gpu_dp_flops)) continue;
@@ -1390,13 +1438,12 @@ int PLAN_CLASS_SPEC::parse(XML_PARSER& xp) {
 
         if (xp.parse_int("min_metal_support", min_metal_support)) continue;
         if (xp.parse_str("gpu_type_regex", buf, sizeof(buf))) {
-            if (regcomp(&(gpu_type_regex), buf, REG_EXTENDED|REG_NOSUB) ) {
+            if (gpu_type_regex.compile(buf, REG_EXTENDED|REG_NOSUB) ) {
                 log_messages.printf(MSG_CRITICAL,
                     "BAD GPU TYPE REGEXP: %s\n", buf
                 );
                 return ERR_XML_PARSE;
             }
-            have_gpu_type_regex = true;
             continue;
         }
 
@@ -1458,16 +1505,12 @@ PLAN_CLASS_SPEC::PLAN_CLASS_SPEC() {
     mem_usage_per_cpu = 0;
     nthreads_cmdline = false;
     projected_flops_scale = 1;
-    have_os_regex = false;
-    have_cpu_vendor_regex = false;
-    have_cpu_model_regex = false;
     min_os_version = 0;
     max_os_version = 0;
     min_android_version = 0;
     max_android_version = 0;
     min_libc_version = 0;
     strcpy(project_prefs_tag, "");
-    have_project_prefs_regex = false;
     project_prefs_default_true = false;
     avg_ncpus = 0;
     min_core_client_version = 0;
@@ -1489,7 +1532,6 @@ PLAN_CLASS_SPEC::PLAN_CLASS_SPEC() {
     min_driver_version = 0;
     max_driver_version = 0;
     strcpy(gpu_utilization_tag, "");
-    have_gpu_type_regex = false;
 
     need_ati_libs = false;
     need_amd_libs = false;
@@ -1497,6 +1539,8 @@ PLAN_CLASS_SPEC::PLAN_CLASS_SPEC() {
     min_cal_target = 0;
     max_cal_target = 0;
     without_opencl = false;
+    require_hip = false;
+    min_hip_version = 0;
 
     require_fp64 = false;
     min_gpu_dp_flops = 0;

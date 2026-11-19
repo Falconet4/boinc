@@ -113,7 +113,7 @@ function to_struct($p) {
             break;
         default:
             echo "unrecognized: ".$x[0]."\n";
-            continue;
+            continue 2;
         }
     }
     if ($gpus) $s->gpus = $gpus;

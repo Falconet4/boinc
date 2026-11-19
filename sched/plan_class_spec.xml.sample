@@ -15,6 +15,16 @@
         <gpu_peak_flops_scale>  .2          </gpu_peak_flops_scale>
         <cpu_frac>              .1          </cpu_frac>
     </plan_class>
+    <!-- Optional HIP selection on the AMD resource.
+         gcn_arch_regex can restrict the gfx target, e.g. RDNA 3/4:
+         ^gfx(11|12)
+    <plan_class>
+        <name>                  hip        </name>
+        <gpu_type>              amd        </gpu_type>
+        <require_hip/>
+        <gcn_arch_regex>        ^gfx(11|12) </gcn_arch_regex>
+    </plan_class>
+    -->
     <!-- Optional FP64 selection.  With neither option set, FP64 work is
          sent to any GPU, as before.  require_fp64 accepts any GPU that
          reports FP64 support; min_gpu_dp_flops additionally requires a

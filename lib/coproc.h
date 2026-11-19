@@ -334,6 +334,10 @@ inline int ati_version_int(int major, int minor, int release) {
     return major*10000000 + minor*10000 + release;
 }
 
+// Format the encoded HIP runtime version for human-readable output.
+//
+extern void format_hip_version(int v, char* buf, int buflen);
+
 struct COPROC_ATI : public COPROC {
     char name[256];
     char version[50];
