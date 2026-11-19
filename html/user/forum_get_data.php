@@ -35,6 +35,13 @@ if (DISABLE_FORUMS) {
 $retval = db_init_xml();
 if ($retval) xml_error($retval);
 
+// A "]]>" inside text would close the CDATA section early and let the rest
+// of the text be parsed as markup, so split it across two sections.
+//
+function cdata($x) {
+    return str_replace("]]>", "]]]]><![CDATA[>", (string)$x);
+}
+
 $method = get_str("method", true);
 if ($method != "user_posts" && $method != "user_threads") {
     xml_error(-1);
@@ -66,12 +73,12 @@ if ($method == "user_posts") {
         echo "<post>\n";
         echo "    <id>$post->id</id>\n";
         echo "    <threadid>$post->thread</threadid>\n";
-        echo "    <threadtitle><![CDATA[".$thread->title."]]></threadtitle>\n";
+        echo "    <threadtitle><![CDATA[".cdata($thread->title)."]]></threadtitle>\n";
         echo "    <timestamp>$post->timestamp</timestamp>\n";
         if ($length > 0) {
-            echo "    <content><![CDATA[".substr($post->content, 0, $length)."]]></content>\n";
+            echo "    <content><![CDATA[".cdata(substr($post->content, 0, $length))."]]></content>\n";
         } else {
-            echo "    <content><![CDATA[".$post->content."]]></content>\n";
+            echo "    <content><![CDATA[".cdata($post->content)."]]></content>\n";
         }
         echo "</post>\n";
     }
@@ -94,7 +101,7 @@ if ($method == "user_posts") {
         echo "    <replies>$thread->replies</replies>\n";
         echo "    <views>$thread->views</views>\n";
         echo "    <timestamp>$thread->timestamp</timestamp>\n";
-        echo "    <title><![CDATA[$thread->title]]></title>\n";
+        echo "    <title><![CDATA[".cdata($thread->title)."]]></title>\n";
         echo "</thread>\n";
     }
 

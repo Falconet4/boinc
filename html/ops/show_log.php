@@ -28,8 +28,12 @@ if (!$log_dir) {
 }
 
 if( isset($_GET["f"]) ){
+    // Keep the raw name for building the path glob; it is quoted as one shell
+    // word below.  escapeshellcmd() alone is not enough here: it leaves
+    // whitespace and other separators intact, and the result was inserted
+    // unquoted.
+    //
     $f = $_GET["f"];
-    $f = escapeshellcmd($f);
 } else {
     $f = "";
 }
@@ -59,14 +63,33 @@ echo " <input class=\"btn btn-default\" type=\"submit\" value=\"Grep\"></form>";
 
 echo 'Hint: Example greps: "RESULT#106876", "26fe99aa_25636_00119.wu_1", "WU#8152", "too many errors", "2003-07-17", "CRITICAL" <br>';
 
+// The pattern is a glob on purpose ("../log*/<name>"), so quoting it would
+// stop the shell expanding it, and escapeshellcmd() is no good either - it
+// backslash-escapes the "*" and breaks the expansion too.
+// So constrain the user-supplied part to characters that can appear in a log
+// file name.  That leaves the literal prefix and the "*.log" default under
+// our control and gives the shell nothing it can act on.
+//
 if (strlen($f)) {
-	$f = "../log*/". $f;
+    if (!preg_match('/^[A-Za-z0-9_.*\[\]-]+$/', $f)
+        || preg_match('/(^|\/)\.\.(\/|$)/', $f)   // no ".." path segment
+        || preg_match('/(^|\/)\.(\/|$)/', $f)      // no "." segment either
+    ) {
+        admin_error_page("bad file pattern");
+    }
+    $f = "../log*/".$f;
 } else {
     $f = "../log*/*.log";
 }
 
 if ($s) {
-    passthru("cd $log_dir && ../bin/grep_logs -html -l $l '$s' $f 2>&1");
+    // $log_dir is project config; $s and $l are user input and are quoted.
+    //
+    $cmd = "cd " . escapeshellarg($log_dir)
+        . " && ../bin/grep_logs -html -l " . (int)$l
+        . " " . escapeshellarg($s)
+        . " " . $f . " 2>&1";
+    passthru($cmd);
 }
 
 admin_page_tail();

@@ -272,7 +272,8 @@ function submit_jobs(
         $x .= "\n";
     }
 
-    $cmd = "cd " . project_dir() . "; ./bin/create_work --appname $app->name --batch $batch_id";
+    $cmd = "cd " . escapeshellarg(project_dir()) . "; ./bin/create_work --appname "
+        . escapeshellarg($app->name) . " --batch " . escapeshellarg($batch_id);
 
     if ($user->seti_id) {
         $cmd .= " --target_user $user->id ";
@@ -281,10 +282,10 @@ function submit_jobs(
         $cmd .= " --priority $priority";
     }
     if ($input_template_filename) {
-        $cmd .= " --wu_template templates/$input_template_filename";
+        $cmd .= " --wu_template " . escapeshellarg("templates/$input_template_filename");
     }
     if ($output_template_filename) {
-        $cmd .= " --result_template templates/$output_template_filename";
+        $cmd .= " --result_template " . escapeshellarg("templates/$output_template_filename");
     }
     if ($app_version_num) {
         $cmd .= " --app_version_num $app_version_num";
@@ -447,7 +448,10 @@ function logical_end_time($r, $jobs, $user, $app) {
             xml_error(-1, "no rsc_fpops_est given");
         }
     }
-    $cmd = "cd " . project_dir() . "/bin; ./adjust_user_priority --user $user->id --flops $total_flops --app $app->name";
+    $cmd = "cd " . escapeshellarg(project_dir() . "/bin")
+        . "; ./adjust_user_priority --user " . escapeshellarg($user->id)
+        . " --flops " . escapeshellarg($total_flops)
+        . " --app " . escapeshellarg($app->name);
     $x = exec($cmd);
     if (!is_numeric($x) || (double)$x == 0) {
         xml_error(-1, "$cmd returned $x");

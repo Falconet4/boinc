@@ -59,7 +59,13 @@ function process_batch($b) {
     $us = BoincUserSubmit::lookup_userid("$user->id");
     if (!$us) die("no user submit record\n");
     $lst = $us->logical_start_time;
-    $cmd = "cd ../../bin; ./adjust_user_priority --user $user->id --flops $fpops_total --app $app->name";
+    // $app->name is project-supplied and was interpolated into a shell
+    // command unquoted; quote every argument.
+    //
+    $cmd = "cd ../../bin; ./adjust_user_priority --user "
+        . escapeshellarg($user->id)
+        . " --flops " . escapeshellarg($fpops_total)
+        . " --app " . escapeshellarg($app->name);
     system($cmd);
     $us = BoincUserSubmit::lookup_userid("$user->id");
     $let = $us->logical_start_time;
