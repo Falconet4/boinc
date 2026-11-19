@@ -22,6 +22,7 @@
 
 #include "parse.h"
 #include "coproc.h"
+#include "cc_config.h"
 
 // GCN has one FMA per lane per clock: 2 FLOPs.
 //
@@ -182,6 +183,41 @@ TEST(test_coproc, vendor_device_roundtrip) {
     EXPECT_DOUBLE_EQ(back.devices[0].total_ram, 32e9);
     EXPECT_STREQ(back.devices[1].name, "RTX 4090");
     EXPECT_EQ(back.devices[1].compcap_minor, 9);
+}
+
+// A device name comes from the driver and may contain characters that are
+// special in XML.  write_xml must escape them, and the escaped form must parse
+// back to the original name - unescaped, the whole coproc_info.xml is
+// malformed and detection result is lost.
+//
+TEST(test_coproc, device_name_xml_escaped) {
+    COPROC_NVIDIA nv;
+    nv.clear();
+    nv.count = 1;
+    GPU_DEVICE g;
+    strcpy(g.vendor, "nvidia");
+    strcpy(g.name, "Radeon & Co <RX 580> \"quoted\"");
+    g.device_num = 0;
+    g.have_fp64 = true;
+    g.total_ram = 8e9;
+    nv.devices.push_back(g);
+
+    char buf[8192];
+    MIOFILE w;
+    w.init_buf_write(buf, sizeof(buf));
+    nv.write_xml(w, false);
+
+    // the raw '&' and '<' must not survive into the document
+    EXPECT_EQ(strstr(buf, "<name>Radeon & Co"), nullptr);
+
+    MIOFILE r;
+    r.init_buf_read(buf);
+    XML_PARSER xp(&r);
+    ASSERT_TRUE(xp.parse_start("coproc_cuda"));
+    COPROC_NVIDIA back;
+    ASSERT_EQ(back.parse(xp), 0);
+    ASSERT_EQ(back.devices.size(), 1u);
+    EXPECT_STREQ(back.devices[0].name, "Radeon & Co <RX 580> \"quoted\"");
 }
 
 TEST(test_coproc, intel_device_roundtrip) {
@@ -630,4 +666,67 @@ TEST(test_coproc, summary_json_worst_case_fits) {
     EXPECT_LT(n, sizeof(buf));
     EXPECT_EQ(buf[n-1], '}');
     EXPECT_NE(std::string(buf).find("\\u0001"), std::string::npos);
+}
+
+// CC_CONFIG::write produced a <device><name> from the same GPU_DEVICE data as
+// coproc_info.xml, but wrote it raw.  A name containing '&' or '<' made the
+// cc_config.xml the client had just written unparseable on the next read.
+//
+TEST(test_coproc, cc_config_device_name_xml_escaped) {
+    // Names the writer must survive: empty, every XML metacharacter, a CDATA
+    // terminator, and the worst case for the 6x escape expansion (a 255-byte
+    // field of '&' becomes 1275 bytes).
+    //
+    std::string worst(255, '&');
+    const char* names[] = {
+        "Radeon & Co <RX 580> \"q\"",
+        "",
+        "a&b<c>d\"e'f",
+        "]]>",
+        worst.c_str(),
+    };
+    for (const char* name : names) {
+        CC_CONFIG cc;      // the constructor applies defaults()
+        LOG_FLAGS lf;
+
+        cc.config_coprocs.n_rsc = PROC_TYPE_NVIDIA_GPU + 1;
+        COPROC& c = cc.config_coprocs.coprocs[PROC_TYPE_NVIDIA_GPU];
+        c.clear();
+        strcpy(c.type, "NVIDIA GPU");
+        c.specified_in_config = true;
+        c.count = 1;
+
+        GPU_DEVICE g;
+        strcpy(g.vendor, "nvidia");
+        strncpy(g.name, name, sizeof(g.name)-1);
+        g.name[sizeof(g.name)-1] = 0;
+        g.device_num = 0;
+        g.have_fp64 = true;
+        g.total_ram = 8e9;
+        c.devices.push_back(g);
+
+        char buf[16384];
+        MIOFILE w;
+        w.init_buf_write(buf, sizeof(buf));
+        ASSERT_EQ(cc.write(w, lf), 0);
+
+        // When escaping is needed, the raw text must not reach the document.
+        // (For names with nothing to escape the raw text is expected.)
+        if (strpbrk(name, "&<>\"'")) {
+            std::string raw = std::string("<name>") + name + "</name>";
+            EXPECT_EQ(strstr(buf, raw.c_str()), nullptr) << "for [" << name << "]";
+        }
+
+        MIOFILE r;
+        r.init_buf_read(buf);
+        XML_PARSER xp(&r);
+        ASSERT_TRUE(xp.parse_start("cc_config"));
+        CC_CONFIG back;
+        LOG_FLAGS lf2;
+        ASSERT_EQ(back.parse(xp, lf2), 0) << "for [" << name << "]";
+
+        COPROC& b = back.config_coprocs.coprocs[PROC_TYPE_NVIDIA_GPU];
+        ASSERT_EQ(b.devices.size(), 1u) << "for [" << name << "]";
+        EXPECT_STREQ(b.devices[0].name, name) << "for [" << name << "]";
+    }
 }
