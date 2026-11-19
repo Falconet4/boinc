@@ -114,7 +114,7 @@ namespace test_str_util {
         int ret;
         char *nilbuf {0};
         snprintf(buf, sizeof(buf), "one two three");
-        ret = parse_command_line(buf, argv);
+        ret = parse_command_line(buf, argv, 100);
         EXPECT_EQ(ret, 3);
         EXPECT_STREQ(argv[0], "one");
         EXPECT_STREQ(argv[1], "two");
@@ -122,7 +122,7 @@ namespace test_str_util {
         EXPECT_STREQ(argv[3], nilbuf);
         EXPECT_STREQ(buf, "one");
         snprintf(buf, sizeof(buf), "four \'five\' \"six\"");
-        ret = parse_command_line(buf, argv);
+        ret = parse_command_line(buf, argv, 100);
         EXPECT_EQ(ret, 3);
         EXPECT_STREQ(argv[0], "four");
         EXPECT_STREQ(argv[1], "five");
@@ -130,7 +130,7 @@ namespace test_str_util {
         EXPECT_STREQ(argv[3], nilbuf);
         EXPECT_STREQ(buf, "four");
         snprintf(buf, sizeof(buf), "seven \'eig ht\' \"ni ne\"");
-        ret = parse_command_line(buf, argv);
+        ret = parse_command_line(buf, argv, 100);
         EXPECT_EQ(ret, 3);
         EXPECT_STREQ(argv[0], "seven");
         EXPECT_STREQ(argv[1], "eig ht");
@@ -138,7 +138,7 @@ namespace test_str_util {
         EXPECT_STREQ(argv[3], nilbuf);
         EXPECT_STREQ(buf, "seven");
         snprintf(buf, sizeof(buf), "tän \'elèv én\' \"tŵelv e\"");
-        ret = parse_command_line(buf, argv);
+        ret = parse_command_line(buf, argv, 100);
         EXPECT_EQ(ret, 3);
         EXPECT_STREQ(argv[0], "tän");
         EXPECT_STREQ(argv[1], "elèv én");
@@ -147,13 +147,19 @@ namespace test_str_util {
         EXPECT_STREQ(buf, "tän");
         // function doesn't check syntax so this works too
         snprintf(buf, sizeof(buf), "13\" \'\"4teen\'\"   ");
-        ret = parse_command_line(buf, argv);
+        ret = parse_command_line(buf, argv, 100);
         EXPECT_EQ(ret, 3);
         EXPECT_STREQ(argv[0], "13\"");
         EXPECT_STREQ(argv[1], "\"4teen");
         EXPECT_STREQ(argv[2], "   ");
         EXPECT_STREQ(argv[3], nilbuf);
         EXPECT_STREQ(buf, "13\"");
+
+        // Excess tokens must be rejected rather than overrun the array
+        char* small_argv[3];
+        snprintf(buf, sizeof(buf), "one two three");
+        ret = parse_command_line(buf, small_argv, 3);
+        EXPECT_EQ(ret, -1);
     }
 
     TEST_F(test_str_util, strip_whitespace) {

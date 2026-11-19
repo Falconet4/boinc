@@ -29,7 +29,7 @@ extern void strcpy_overlap(char*, const char*);
 extern int ndays_to_string(double x, int smallest_timescale, char *buf);
 extern void nbytes_to_string(double nbytes, double total_bytes, char* str, int len);
 extern std::string flops_to_string(double flops);
-extern int parse_command_line(char*, char**);
+extern int parse_command_line(char*, char**, int max_args);
 extern void strip_whitespace(char *str);
 extern void strip_whitespace(std::string&);
 extern void strip_quotes(char *str);

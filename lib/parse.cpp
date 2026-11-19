@@ -371,46 +371,74 @@ void non_ascii_escape(const char* in, char* out, int len) {
 // NOTE: output buffer should be 6X size of input
 //
 void xml_escape(const char* in, char* out, int len) {
-    char buf[256], *p;
+    char buf[16], *p;
+    char* end;
 
+    if (len <= 0) return;
+
+    // end points at the last byte, which is reserved for the NUL.
+    // An escape is written only if the whole thing fits; this can't
+    // cut an entity in half.
+    //
     p = out;
+    end = out + len - 1;
 
     for (; *in; in++) {
         int x = (int) *in;
+        const char* rep;
+        int n;
+
         x &= 0xff;   // just in case
         if (x == '<') {
-            strcpy(p, "&lt;");
-            p += 4;
+            rep = "&lt;";
+            n = 4;
         } else if (x == '&') {
-            strcpy(p, "&amp;");
-            p += 5;
+            rep = "&amp;";
+            n = 5;
+        } else if (x == '"') {
+            // Needed if the result is ever placed in an attribute value
+            rep = "&quot;";
+            n = 6;
+        } else if (x == '\'') {
+            rep = "&apos;";
+            n = 6;
         } else if (x>127) {
             snprintf(buf, sizeof(buf), "&#%d;", x);
-            strcpy(p, buf);
-            p += strlen(buf);
+            rep = buf;
+            n = (int)strlen(buf);
         } else if (x<32) {
             switch(x) {
             case 9:
             case 10:
             case 13:
                 snprintf(buf, sizeof(buf), "&#%d;", x);
-                strcpy(p, buf);
-                p += strlen(buf);
+                rep = buf;
+                n = (int)strlen(buf);
                 break;
+            default:
+                continue;
             }
         } else if (x == ']') {
             // two stage check, strncmp() is slow
             if (!strncmp(in, "]]>", 3)) {
-                strcpy(p, "]]&gt;");
-                p += 6;
+                rep = "]]&gt;";
+                n = 6;
                 in += 2;  // +1 from for loop
             } else {
-                *p++ = (char)x;
+                buf[0] = (char)x;
+                buf[1] = 0;
+                rep = buf;
+                n = 1;
             }
         } else {
-            *p++ = (char)x;
+            buf[0] = (char)x;
+            buf[1] = 0;
+            rep = buf;
+            n = 1;
         }
-        if (p > out + len - 8) break;
+        if (n > end - p) break;
+        memcpy(p, rep, n);
+        p += n;
     }
     *p = 0;
 }
@@ -429,10 +457,7 @@ void xml_unescape(string& in) {
 void xml_unescape(char* buf) {
     char* out = buf;
     char* in = buf;
-    char* p;
-    bool goodescape;
     while (*in) {
-        goodescape = false;
         if (*in != '&') {       // avoid strncmp's if possible
             *out++ = *in++;
         } else if (!strncmp(in, "&lt;", 4)) {
@@ -457,33 +482,26 @@ void xml_unescape(char* buf) {
             *out++ = '\n';
             in += 5;
         } else if (!strncmp(in, "&#", 2)) {
-            //If escape is poorly formed or outside of char size, then print as is.
+            // A numeric entity has at most 4 digits and must end with ';'.
+            // Scan only those bytes; searching the whole remainder for ';'
+            // was O(n^2) on hostile input.
+            //
             in += 2;
-            p = strchr(in, ';');
-            if (!p || *in == ';') { //No end semicolon found or it was formatted as &#;
+            unsigned int ndigits = 0;
+            while (ndigits < 4 && isdigit((unsigned char)in[ndigits])) ndigits++;
+            unsigned long ascii = 0;
+            if (ndigits > 0 && in[ndigits] == ';') {
+                char tmp[8];
+                memcpy(tmp, in, ndigits);
+                tmp[ndigits] = 0;
+                ascii = strtoul(tmp, NULL, 10);
+            }
+            if (ndigits > 0 && in[ndigits] == ';' && ascii > 0 && ascii < 256) {
+                *out++ = (char)ascii;
+                in += ndigits + 1;      // past the ';'
+            } else {
                 *out++ = '&';
                 *out++ = '#';
-            } else {
-                //Check that escape is formed correctly
-                for (unsigned int i = 0; i < 4 || i < strlen(in); i++) {
-                    if (!isdigit(*(in + i)) && *(in + i) != ';') {
-                        //Found something other than a single digit.
-                        break;
-                    }
-                    if (*(in + i) == ';') {
-                        goodescape = true;
-                        break;
-                    }
-                }
-                int ascii = atoi(in);
-
-                if (goodescape && ascii < 256) {
-                    *out++ = (char)ascii;
-                    in = p + 1;
-                } else {
-                    *out++ = '&';
-                    *out++ = '#';
-                }
             }
         } else {
             *out++ = *in++;
@@ -682,14 +700,26 @@ bool XML_PARSER::parse_int(const char* start_tag, int& i) {
         }
     }
     errno = 0;
-    long val = strtol(buf, &end, 0);
-    if (errno) return false;
-    if (end != buf+strlen(buf)) return false;
+    // Base 10, except for an explicit 0x prefix; base 0 would treat a
+    // leading zero as octal.  Skip blanks for the probe, as strtol() does.
+    //
+    const char* q = buf;
+    while (*q == ' ' || *q == '\t') q++;
+    int base = (q[0] == '0' && (q[1] == 'x' || q[1] == 'X')) ? 16 : 10;
+    long val = strtol(buf, &end, base);
+    // Consume the closing tag even when the value is bad, so the parser
+    // stays in sync and the caller does not silently skip it.
+    //
+    bool good = true;
+    if (errno) good = false;
+    if (end != buf+strlen(buf)) good = false;
+    if (val < INT_MIN || val > INT_MAX) good = false;
 
     eof = get(tag, sizeof(tag), is_tag);
     if (eof) return false;
     if (!is_tag) return false;
     if (strcmp(tag, end_tag)) return false;
+    if (!good) return false;
     i = (int)val;
     return true;
 }
@@ -758,13 +788,18 @@ bool XML_PARSER::parse_double(const char* start_tag, double& x) {
 #else
     double val = strtod(buf, &end);
 #endif
-    if (errno) return false;
-    if (end != buf+strlen(buf)) return false;
+    // Consume the closing tag even when the value is bad (see parse_int).
+    //
+    bool good = true;
+    if (errno) good = false;
+    if (end != buf+strlen(buf)) good = false;
+    if (!boinc_is_finite(val)) good = false;
 
     eof = get(tag, sizeof(tag), is_tag);
     if (eof) return false;
     if (!is_tag) return false;
     if (strcmp(tag, end_tag)) return false;
+    if (!good) return false;
     x = val;
     return true;
 }

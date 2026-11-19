@@ -491,6 +491,6 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int) {
 
     instance = inst;
     command_line = GetCommandLine();
-    argc = parse_command_line(command_line, argv);
+    argc = parse_command_line(command_line, argv, 100);
     main(argc, argv);
 }

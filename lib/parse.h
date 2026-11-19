@@ -19,6 +19,7 @@
 #define BOINC_PARSE_H
 
 #include <cstdio>
+#include <climits>
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
@@ -298,9 +299,20 @@ extern unsigned long long boinc_strtoull(const char *, char **, int);
 inline bool parse_int(const char* buf, const char* tag, int& x) {
     const char* p = strstr(buf, tag);
     if (!p) return false;
+    p += strlen(tag);
     errno = 0;
-    long y = strtol(p+strlen(tag), 0, 0);        // this parses 0xabcd correctly
+    // Base 10, except for an explicit 0x prefix.  strtol(..., 0) would
+    // silently parse "010" as octal.  Skip leading space before the
+    // probe: strtol() skips it, so " 0x10" is still hexadecimal.
+    //
+    const char* q = p;
+    while (*q == ' ' || *q == '\t') q++;
+    int base = (q[0] == '0' && (q[1] == 'x' || q[1] == 'X')) ? 16 : 10;
+    char* end = NULL;
+    long y = strtol(p, &end, base);
     if (errno) return false;
+    if (end == p) return false;         // no digits at all
+    if (y < INT_MIN || y > INT_MAX) return false;
     x = (int)y;
     return true;
 }
@@ -311,14 +323,17 @@ inline bool parse_double(const char* buf, const char* tag, double& x) {
     double y;
     const char* p = strstr(buf, tag);
     if (!p) return false;
+    const char* value = p + strlen(tag);
+    char* end = NULL;
     errno = 0;
 #if (defined(__APPLE__) && defined(BUILDING_MANAGER))
 // MacOS 13.3.1 apparently broke per-thread locale uselocale()
-    y = strtod_l(p+strlen(tag), NULL, LC_C_LOCALE);
+    y = strtod_l(value, &end, LC_C_LOCALE);
 #else
-    y = strtod(p+strlen(tag), NULL);
+    y = strtod(value, &end);
 #endif
     if (errno) return false;
+    if (end == value) return false;     // no digits at all
     if (!boinc_is_finite(y)) {
         return false;
     }

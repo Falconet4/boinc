@@ -124,7 +124,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
     int argc;
 
     command_line = GetCommandLine();
-    argc = parse_command_line(command_line, argv);
+    argc = parse_command_line(command_line, argv, 100);
     return main(argc, argv);
 }
 #endif

@@ -18,6 +18,7 @@
 #ifndef _WIN32
 #include <string>
 #include <ios>
+#include <cstring>
 #include "gtest/gtest.h"
 #endif
 #include "common_defs.h"
@@ -110,5 +111,46 @@ namespace test_parse {
         EXPECT_TRUE(success);
         EXPECT_EQ(expects, 5);
 
+    }
+
+    TEST(test_xml_escape, xml_escape_basic) {
+        char out[64];
+        xml_escape("<&\"']]>", out, sizeof(out));
+        EXPECT_STREQ(out, "&lt;&amp;&quot;&apos;]]&gt;");
+    }
+
+    TEST(test_xml_escape, xml_escape_control_and_high_bytes) {
+        char out[64];
+        const char in[] = {1, 'a', 9, (char)0xff, 0};
+        xml_escape(in, out, sizeof(out));
+        EXPECT_STREQ(out, "a&#9;&#255;");
+    }
+
+    // A short output buffer must stop at a complete entity, never in the
+    // middle of one, and must always be NUL-terminated.
+    //
+    TEST(test_xml_escape, xml_escape_short_buffers) {
+        const char* in = "<&\"'a]]>\x01\xffz";
+        char full[256];
+        xml_escape(in, full, sizeof(full));
+        for (int len=1; len<=12; len++) {
+            char out[32];
+            memset(out, 0xAA, sizeof(out));
+            xml_escape(in, out, len);
+            EXPECT_LE(strlen(out), (size_t)len-1) << "len=" << len;
+            EXPECT_EQ(std::string(out), std::string(full).substr(
+                0, strlen(out)
+            )) << "len=" << len;
+            for (int k=len; k<32; k++) {
+                EXPECT_EQ((unsigned char)out[k], 0xAA)
+                    << "wrote past len=" << len;
+            }
+            // every '&' begins an entity, so it must be terminated
+            const char* amp = strrchr(out, '&');
+            if (amp) {
+                EXPECT_NE(strchr(amp, ';'), nullptr)
+                    << "partial entity at len=" << len;
+            }
+        }
     }
 }

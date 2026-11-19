@@ -282,17 +282,17 @@ int TASK::run(int argct, char** argvt) {
 		if (stdout_filename != "") {
 			boinc_resolve_filename_s(stdout_filename.c_str(), stdout_path);
 			stdout_file = freopen(stdout_path.c_str(), "a", stdout);
-			if (!stdout_file) return ERR_FOPEN;
+			if (!stdout_file) _exit(ERR_FOPEN);
 		}
 		if (stdin_filename != "") {
 			boinc_resolve_filename_s(stdin_filename.c_str(), stdin_path);
 			stdin_file = freopen(stdin_path.c_str(), "r", stdin);
-			if (!stdin_file) return ERR_FOPEN;
+			if (!stdin_file) _exit(ERR_FOPEN);
 		}
         if (stderr_filename != "") {
             boinc_resolve_filename_s(stderr_filename.c_str(), stderr_path);
             stderr_file = freopen(stderr_path.c_str(), "a", stderr);
-            if (!stderr_file) return ERR_FOPEN;
+            if (!stderr_file) _exit(ERR_FOPEN);
         }
 
 		// construct argv
@@ -300,7 +300,11 @@ int TASK::run(int argct, char** argvt) {
         //
         argv[0] = app_path;
         strlcpy(arglist, command_line.c_str(), sizeof(arglist));
-        argc = parse_command_line(arglist, argv+1);
+        argc = parse_command_line(arglist, argv+1, 255);
+        if (argc < 0) {
+            fprintf(stderr, "Too many arguments in command line\n");
+            _exit(ERR_BUFFER_OVERFLOW);
+        }
         setpriority(PRIO_PROCESS, 0, PROCESS_IDLE_PRIORITY);
         retval = execv(app_path, argv);
         perror("execv() failed: ");
