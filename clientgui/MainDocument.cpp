@@ -1881,11 +1881,46 @@ int CMainDocument::WorkShowGraphics(RESULT* rp) {
 }
 
 
+// The address comes from the client/VM description and is interpolated
+// into a command line, so restrict it to characters that are valid in a
+// host name, IPv4/IPv6 literal or host:port pair.
+//
+static bool valid_remote_desktop_addr(const wxString& addr) {
+    if (addr.IsEmpty()) return false;
+    // A leading dash could be interpreted as an option by the remote
+    // desktop client.
+    //
+    if (addr[0] == '-') return false;
+    for (size_t i = 0; i < addr.length(); i++) {
+        wxUniChar c = addr[i];
+        wxUint32 v = c.GetValue();
+        // ASCII alphanumerics only: wxIsalnum() is locale-dependent and
+        // would accept non-ASCII characters that the remote desktop
+        // clients cannot handle.
+        //
+        bool alnum = (v >= '0' && v <= '9')
+            || (v >= 'a' && v <= 'z') || (v >= 'A' && v <= 'Z');
+        // Brackets and percent are needed for IPv6 literals and zone IDs.
+        //
+        if (!(alnum || v == '.' || v == ':' || v == '-'
+            || v == '_' || v == '[' || v == ']' || v == '%'
+        )) {
+            return false;
+        }
+    }
+    return true;
+}
+
 int CMainDocument::WorkShowVMConsole(RESULT* res) {
     int iRetVal = 0;
 
     if (strlen(res->remote_desktop_addr)) {
         wxString strConnection(res->remote_desktop_addr, wxConvUTF8);
+        strConnection.Trim(true).Trim(false);
+        if (!valid_remote_desktop_addr(strConnection)) {
+            wxLogError(_("Invalid remote desktop address"));
+            return ERR_INVALID_PARAM;
+        }
         wxString strCommand;
 
 #if   defined(__WXMSW__)
@@ -2125,15 +2160,36 @@ void localize(wxString& strMessage) {
     wxString strStart = wxString(wxT("_(\""));
     wxString strEnd = wxString(wxT("\")"));
 
-    while (strMessage.Find(strStart.c_str()) != wxNOT_FOUND) {
-        strBuffer = strMessage.SubString(
-            strMessage.Find(strStart.c_str()) + strStart.Length(),
-            strMessage.Find(strEnd.c_str()) - (strEnd.Length() - 1)
-        );
-        strMessage.Replace(
-            wxString(strStart + strBuffer + strEnd).c_str(),
-            wxGetTranslation(strBuffer.c_str())
-        );
+    while (true) {
+        int start = strMessage.Find(strStart);
+        if (start == wxNOT_FOUND) break;
+        int content_start = start + strStart.Length();
+        // Search from the opening marker: a ")" that appears before it is
+        // part of the surrounding text, not the end of this marker.
+        int tail_end = strMessage.Mid(content_start).Find(strEnd);
+        int end = (tail_end == wxNOT_FOUND)
+            ? wxNOT_FOUND : content_start + tail_end;
+        if (end == wxNOT_FOUND || end < content_start) {
+            // Malformed _("..." text.  Returning the tail here, as the
+            // old code did, built a pattern that was never present and
+            // looped forever.
+            //
+            break;
+        }
+        strBuffer = strMessage.Mid(content_start, end - content_start);
+        wxString strPattern = strStart + strBuffer + strEnd;
+        wxString translated = wxGetTranslation(strBuffer);
+        if (translated.Find(strStart) != wxNOT_FOUND
+            || translated.Find(strEnd) != wxNOT_FOUND
+        ) {
+            // The translation reintroduces an opening or closing marker;
+            // replacing the text with it would either grow the message on
+            // every pass or terminate the marker early on the next one.
+            // Fall back to the untranslated text.
+            //
+            translated = strBuffer;
+        }
+        strMessage.Replace(strPattern, translated);
     }
 }
 
@@ -2391,16 +2447,22 @@ int CMainDocument::CachedStatisticsStatusUpdate() {
 
     if (! IsConnected()) return -1;
 
-#if USE_CACHE_TIMEOUTS
+    // Refresh at most once per interval regardless of USE_CACHE_TIMEOUTS:
+    // "projects empty" must not force a blocking RPC on every repaint
+    // (a host with no projects would otherwise never satisfy the cache).
+    //
     wxTimeSpan ts(wxDateTime::Now() - m_dtStatisticsStatusTimestamp);
     if (ts.GetSeconds() >= (2 * STATISTICSSTATUSRPC_INTERVAL)) immediate = true;
-#endif
-    if (statistics_status.projects.empty()) immediate = true;
     if (m_dtStatisticsStatusTimestamp.IsEqualTo(wxDateTime((time_t)0))) immediate = true;
 
     if (immediate) {
+        // Store the status code, not the timestamp, in the result field.
+        // Assigning the int to m_dtStatisticsStatusTimestamp turned 0 into
+        // 1970-01-01, which made the cache look stale forever and caused a
+        // blocking get_statistics RPC on every Statistics repaint.
+        //
+        m_iGet_statistics_rpc_result = rpc.get_statistics(statistics_status);
         m_dtStatisticsStatusTimestamp = wxDateTime::Now();
-        m_dtStatisticsStatusTimestamp = rpc.get_statistics(statistics_status);
     }
 
     if (m_iGet_statistics_rpc_result) {
@@ -2408,7 +2470,7 @@ int CMainDocument::CachedStatisticsStatusUpdate() {
         ForceCacheUpdate();
     }
 
-    return m_iGet_state_rpc_result;
+    return m_iGet_statistics_rpc_result;
 }
 
 
