@@ -150,7 +150,29 @@ void GUI_RPC_CONN_SET::get_password() {
     // try to write it to the file.
     // if fail, just return; we're still password-protected
     //
+#ifndef _WIN32
+    // Create the file with its final mode rather than fopen() (which uses
+    // 0666 & ~umask) followed by chmod().  The old order left the password
+    // world-readable for the time between the two calls.  The chmod() below
+    // may still widen access to the group, but it only narrows or keeps it,
+    // never exposes the secret to others.
+    //
+    // O_NOFOLLOW: in sandbox mode the data dir is group-writable, so another
+    // member can plant a symlink here.  Without it a dangling link would make
+    // us create the attacker's target file with the password in it.  With it
+    // the open fails with ELOOP and we leave no file behind.
+    //
+    int fd = open(
+        GUI_RPC_PASSWD_FILE,
+        O_WRONLY|O_CREAT|O_TRUNC|O_NOFOLLOW, S_IRUSR|S_IWUSR
+    );
+    f = (fd < 0) ? NULL : fdopen(fd, "w");
+    if (fd >= 0 && !f) {
+        ::close(fd);
+    }
+#else
     f = fopen(GUI_RPC_PASSWD_FILE, "w");
+#endif
     if (!f) {
         msg_printf(NULL, MSG_USER_ALERT,
             "Can't open %s - fix permissions", GUI_RPC_PASSWD_FILE
