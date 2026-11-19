@@ -364,33 +364,34 @@ static void ati_device_json(char* buf, size_t len, const COPROC_ATI_DEVICE& d) {
 //
 #define MAX_DEVICES_JSON 48000
 
+// Append one vendor's devices as JSON array elements, stopping before the
+// host.misc blob would overflow.  Values are passed whole so the result is
+// never truncated mid-object.
+//
+static void append_vendor_devices(
+    string& out, const std::vector<GPU_DEVICE>& devices
+) {
+    char buf[8192];
+    for (const GPU_DEVICE& d: devices) {
+        if (out.size() > MAX_DEVICES_JSON) return;
+        device_json(buf, sizeof(buf), d);
+        if (!out.empty()) out += ",\n";
+        out += buf;
+    }
+}
+
 void COPROCS::devices_string_json(string& out) {
     out = "";
     char buf[8192];
-    for (unsigned int i=0; i<ati.devices.size(); i++) {
+    for (const COPROC_ATI_DEVICE& d: ati.devices) {
         if (out.size() > MAX_DEVICES_JSON) return;
-        ati_device_json(buf, sizeof(buf), ati.devices[i]);
+        ati_device_json(buf, sizeof(buf), d);
         if (!out.empty()) out += ",\n";
         out += buf;
     }
-    for (unsigned int i=0; i<nvidia.devices.size(); i++) {
-        if (out.size() > MAX_DEVICES_JSON) return;
-        device_json(buf, sizeof(buf), nvidia.devices[i]);
-        if (!out.empty()) out += ",\n";
-        out += buf;
-    }
-    for (unsigned int i=0; i<intel_gpu.devices.size(); i++) {
-        if (out.size() > MAX_DEVICES_JSON) return;
-        device_json(buf, sizeof(buf), intel_gpu.devices[i]);
-        if (!out.empty()) out += ",\n";
-        out += buf;
-    }
-    for (unsigned int i=0; i<apple_gpu.devices.size(); i++) {
-        if (out.size() > MAX_DEVICES_JSON) return;
-        device_json(buf, sizeof(buf), apple_gpu.devices[i]);
-        if (!out.empty()) out += ",\n";
-        out += buf;
-    }
+    append_vendor_devices(out, nvidia.devices);
+    append_vendor_devices(out, intel_gpu.devices);
+    append_vendor_devices(out, apple_gpu.devices);
 }
 
 void COPROCS::summary_string_json(string &out) {
