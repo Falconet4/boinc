@@ -396,7 +396,7 @@ tmpgcc_libpath=
 
 for dirs in `${CC} -print-search-dirs 2>&1 | grep libraries | sed -e 's/:/ /g' -e 's/=/ /g'`
 do
-  if test -d $dirs/. && cd $dirs 2>&1 >/dev/null ; then
+  if test -n "$dirs" && test -d "$dirs/." && cd "$dirs" >/dev/null ; then
     nowdir=`pwd`
     if test -n "${tmpgcc_libpath}" ; then
       tmpgcc_libpath="${tmpgcc_libpath}:${nowdir}"
@@ -404,9 +404,9 @@ do
       tmpgcc_libpath="${dirs}"
     fi
   fi
-  cd $mydir
+  cd "$mydir" || AC_MSG_ERROR([cannot return to $mydir])
 done
-cd $mydir
+cd "$mydir" || AC_MSG_ERROR([cannot return to $mydir])
 if test -n "${tmpgcc_libpath}" ; then
   tmp_libpath="${tmpgcc_libpath}:${tmp_libpath}"
 fi

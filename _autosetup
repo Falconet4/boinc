@@ -19,7 +19,7 @@ esac
 check_version()
 {
     dir=`pwd`
-    cd /tmp
+    cd /tmp || { echo "cannot cd to /tmp" >&2; exit 1; }
     foundit=
     ## get current version of $1
     desired=`echo $2 | awk -F. '{print $1*100+$2}'`
@@ -35,8 +35,7 @@ check_version()
         version=0
         success=no
     else
-        cmdline="$fullpath --version";
-        if version=`($cmdline 2>/dev/null)` 2>/dev/null; then
+        if version=`("$fullpath" --version 2>/dev/null)` 2>/dev/null; then
             echo >/dev/null
         else
             version="0";
@@ -50,9 +49,9 @@ check_version()
             success=no
         fi
     fi
-    cd $dir
+    cd "$dir" || { echo "cannot return to $dir" >&2; exit 1; }
 
-    if [ $success = "yes" ] ; then
+    if [ "$success" = "yes" ] ; then
       echo "succeeded. ($version)"
       return 0;
     else
