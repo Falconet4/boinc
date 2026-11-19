@@ -103,7 +103,7 @@
         <gpu_type>              nvidia      </gpu_type>
         <opencl/>
         <min_core_client_version>70000      </min_core_client_version>
-        <min_opencl_version>    101         <min_opencl_version>
+        <min_opencl_version>    101         </min_opencl_version>
         <min_gpu_ram_mb>        256         </min_gpu_ram_mb>
         <gpu_ram_used_mb>       256         </gpu_ram_used_mb>
         <cpu_frac>              .1          </cpu_frac>
@@ -114,7 +114,7 @@
         <gpu_type>              amd         </gpu_type>
         <opencl/>
         <min_core_client_version>70000      </min_core_client_version>
-        <min_opencl_version>    101         <min_opencl_version>
+        <min_opencl_version>    101         </min_opencl_version>
         <min_gpu_ram_mb>        256         </min_gpu_ram_mb>
         <gpu_ram_used_mb>       256         </gpu_ram_used_mb>
         <cpu_frac>              .1          </cpu_frac>

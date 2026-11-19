@@ -185,10 +185,27 @@ void COPROCS::get(
     correlate_gpus(use_all, descs, ignore_gpu_instance);
 }
 
+// Highest DPM clock found for a PCI bus, memoized within one detection
+// run.  Reset at the start of detect_gpus() so that a later run (for
+// example after the driver applies a new power cap) re-reads the table.
+//
+#ifdef __linux__
+static int dpm_cached_bus = -1;
+static int dpm_cached_mhz = -1;
+#endif
+
+static void reset_dpm_clock_cache() {
+#ifdef __linux__
+    dpm_cached_bus = -1;
+    dpm_cached_mhz = -1;
+#endif
+}
+
 // populate the global vectors
 // ati_gpus, nvidia_gpus, intel_gpus, nvidia_opencls, etc.
 //
 void COPROCS::detect_gpus(vector<string> &warnings) {
+    reset_dpm_clock_cache();
 #ifdef _WIN32
 #if !defined(_M_ARM) && !defined(_M_ARM64)
     try {
@@ -455,6 +472,9 @@ int COPROCS::add_other_coproc_types() {
         c.available_ram = c.opencl_prop.global_mem_size;
         c.device_num = c.opencl_prop.device_num;
         c.peak_flops = c.opencl_prop.peak_flops;
+        c.peak_flops_dp = c.opencl_prop.peak_flops_dp;
+        c.have_fp64 = c.opencl_prop.have_fp64
+            || (c.opencl_prop.double_fp_config != 0);
         c.have_opencl = true;
         c.opencl_device_indexes[0] = c.opencl_prop.opencl_device_index;
         c.opencl_device_ids[0] = c.opencl_prop.device_id;
@@ -960,9 +980,10 @@ int amd_max_dpm_clock_mhz(int pci_bus) {
         if (pci_bus < 0) return -1;
     }
 
-    static int cached_bus = -1;
-    static int cached_mhz = -1;
-    if (pci_bus == cached_bus) return cached_mhz;
+    // Memoized per detection run; reset_dpm_clock_cache() runs at the
+    // start of detect_gpus(), so a later run sees the current DPM table.
+    //
+    if (pci_bus == dpm_cached_bus) return dpm_cached_mhz;
 
     // The DPM table is dynamic: it can show a reduced top level while the
     // GPU is powered down or power-capped.  Sample it a few times and keep
@@ -974,8 +995,8 @@ int amd_max_dpm_clock_mhz(int pci_bus) {
         if (v > best) best = v;
         if (i < 2) boinc_sleep(0.01);
     }
-    cached_bus = pci_bus;
-    cached_mhz = best;
+    dpm_cached_bus = pci_bus;
+    dpm_cached_mhz = best;
     return best;
 #else
     (void)pci_bus;

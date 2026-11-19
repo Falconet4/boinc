@@ -686,8 +686,17 @@ void COPROCS::get_opencl(
                     opencl_prop.have_fp64 = c.have_fp64;
                 }
 
-                if (ati_gpus.size()) {
-                    opencl_prop.opencl_available_ram = ati_gpus[opencl_prop.device_num].available_ram;
+                // device_num is an ati_gpus index only when it came from
+                // CAL.  For HIP/OpenCL-only detection it indexes
+                // ati_opencls, so using it here could attribute another
+                // GPU's free RAM to this device.  Fall back to the
+                // OpenCL total instead.
+                //
+                if (ati.have_cal && opencl_prop.device_num >= 0
+                    && opencl_prop.device_num < (int)ati_gpus.size()
+                ) {
+                    opencl_prop.opencl_available_ram =
+                        ati_gpus[opencl_prop.device_num].available_ram;
                 } else {
                     opencl_prop.opencl_available_ram = opencl_prop.global_mem_size;
                 }
@@ -1248,13 +1257,19 @@ void COPROC::merge_opencl(
     // which CAL or CUDA found equivalent to best instance
     //
     opencl_device_count = 0;
-    for (i=0; i<(unsigned int)count; ++i) {
+    unsigned int n_inst = (unsigned int)count;
+    if (n_inst > MAX_COPROC_INSTANCES) n_inst = MAX_COPROC_INSTANCES;
+    for (i=0; i<n_inst; ++i) {
         for (j=0; j<opencls.size(); j++) {
             if (device_nums[i] == opencls[j].device_num) {
-                opencls[j].is_used = COPROC_USED;
-                opencl_device_indexes[opencl_device_count] = opencls[j].opencl_device_index;
-                opencl_device_ids[opencl_device_count++] = opencls[j].device_id;
-                instance_has_opencl[i] = true;
+                if (opencl_device_count < MAX_COPROC_INSTANCES) {
+                    opencls[j].is_used = COPROC_USED;
+                    instance_has_opencl[i] = true;
+                    opencl_device_indexes[opencl_device_count] =
+                        opencls[j].opencl_device_index;
+                    opencl_device_ids[opencl_device_count++] =
+                        opencls[j].device_id;
+                }
             }
         }
     }
@@ -1307,11 +1322,16 @@ void COPROC::find_best_opencls(
             continue;
         }
         if (use_all || !opencl_compare(opencls[i], opencl_prop, true)) {
+            if (count >= MAX_COPROC_INSTANCES) continue;
+            opencls[i].is_used = COPROC_USED;
             instance_has_opencl[count] = true;
             device_nums[count++] = opencls[i].device_num;
-            opencl_device_indexes[opencl_device_count] = opencls[i].opencl_device_index;
-            opencl_device_ids[opencl_device_count++] = opencls[i].device_id;
-            opencls[i].is_used = COPROC_USED;
+            if (opencl_device_count < MAX_COPROC_INSTANCES) {
+                opencl_device_indexes[opencl_device_count] =
+                    opencls[i].opencl_device_index;
+                opencl_device_ids[opencl_device_count++] =
+                    opencls[i].device_id;
+            }
         }
     }
 }
