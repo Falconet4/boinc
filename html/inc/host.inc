@@ -380,7 +380,9 @@ function gpu_desc($misc) {
     $gpus = [];
     foreach ($misc->gpus as $g) {
         if (empty($g->count)) $g->count = 1;
-        $x = sprintf('%d %s', $g->count, $g->model);
+        $x = sprintf('%d %s', $g->count,
+            htmlspecialchars($g->model)
+        );
         if (!empty($g->ram_mb)) {
             $x .= sprintf('; %s RAM', size_string($g->ram_mb*MEGA));
         }
