@@ -69,6 +69,7 @@ set(LIBBOINC_HEADERS_GENERIC
     ${BOINC_DIR}/lib/diagnostics.h
     ${BOINC_DIR}/lib/error_numbers.h
     ${BOINC_DIR}/lib/filesys.h
+    ${BOINC_DIR}/lib/hip_boinc.h
     ${BOINC_DIR}/lib/hostinfo.h
     ${BOINC_DIR}/lib/keyword.h
     ${BOINC_DIR}/lib/md5.h

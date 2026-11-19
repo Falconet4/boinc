@@ -74,6 +74,7 @@
       <ExcludedFromBuild Condition="'$(Platform)'=='ARM64'">true</ExcludedFromBuild>
     </ClCompile>
     <ClCompile Include="..\client\gpu_opencl.cpp" />
+    <ClCompile Include="..\client\gpu_hip.cpp" />
     <ClCompile Include="..\client\gui_http.cpp" />
     <ClCompile Include="..\client\gui_rpc_server.cpp" />
     <ClCompile Include="..\client\gui_rpc_server_ops.cpp" />

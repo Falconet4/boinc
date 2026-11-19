@@ -139,7 +139,7 @@ void COPROC_ATI::get(
     }
 
     if (!callib) {
-        gpu_warning(warnings, "No ATI library found.");
+        // CAL is a legacy fallback; absence is normal on modern systems.
         return;
     }
 
@@ -373,6 +373,7 @@ void COPROC_ATI::get(
         cc.amdrt_detected = amdrt_detected;
         cc.atirt_detected = atirt_detected;
         cc.device_num = i;
+        cc.count = 1;
         cc.set_peak_flops();
         if (cc.bad_gpu_peak_flops("CAL", s)) {
             gpu_warning(warnings, s.c_str());
@@ -429,6 +430,8 @@ void COPROC_ATI::correlate(
         } else if (this->have_opencl && !ati_gpus[i].have_opencl) {
             ati_gpus[i].is_used = COPROC_UNUSED;
         } else if (this->have_cal && !ati_gpus[i].have_cal) {
+            ati_gpus[i].is_used = COPROC_UNUSED;
+        } else if (this->have_hip && !ati_gpus[i].have_hip) {
             ati_gpus[i].is_used = COPROC_UNUSED;
         } else if (use_all || !ati_compare(ati_gpus[i], *this, true)) {
             device_nums[count] = ati_gpus[i].device_num;

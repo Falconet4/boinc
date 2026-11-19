@@ -93,6 +93,7 @@
 		DD25F72815914F8C007845B5 /* gpu_nvidia.cpp in Sources */ = {isa = PBXBuildFile; fileRef = DD25F72315914F8C007845B5 /* gpu_nvidia.cpp */; };
 		DD25F72915914F8C007845B5 /* gpu_amd.cpp in Sources */ = {isa = PBXBuildFile; fileRef = DD25F72415914F8C007845B5 /* gpu_amd.cpp */; };
 		DD25F72A15914F8C007845B5 /* gpu_opencl.cpp in Sources */ = {isa = PBXBuildFile; fileRef = DD25F72515914F8C007845B5 /* gpu_opencl.cpp */; };
+		A1B2C3D4E5F60718293A4B02 /* gpu_hip.cpp in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B01 /* gpu_hip.cpp */; };
 		DD25F72B15914F8C007845B5 /* gpu_detect.cpp in Sources */ = {isa = PBXBuildFile; fileRef = DD25F72615914F8C007845B5 /* gpu_detect.cpp */; };
 		DD262C781366D2A200C9A187 /* cc_config.cpp in Sources */ = {isa = PBXBuildFile; fileRef = DD4AE04B13652BD700285859 /* cc_config.cpp */; };
 		DD262C811366D35A00C9A187 /* cc_config.cpp in Sources */ = {isa = PBXBuildFile; fileRef = DD4AE04B13652BD700285859 /* cc_config.cpp */; };
@@ -973,6 +974,7 @@
 		DD1E4B7A14DCA83F0093C711 /* async_file.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = async_file.h; sourceTree = "<group>"; };
 		DD1F0ACD0822069E00AFC5FA /* MacGUI.pch */ = {isa = PBXFileReference; fileEncoding = 30; lastKnownFileType = sourcecode.c.h; name = MacGUI.pch; path = ../clientgui/mac/MacGUI.pch; sourceTree = SOURCE_ROOT; };
 		DD2049DC0D862516009EEE7A /* coproc.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = coproc.h; path = ../lib/coproc.h; sourceTree = SOURCE_ROOT; };
+		A1B2C3D4E5F60718293A4B05 /* hip_boinc.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = hip_boinc.h; path = ../lib/hip_boinc.h; sourceTree = SOURCE_ROOT; };
 		DD213C9B2568099200A535C1 /* BoincCmd-Info.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; path = "BoincCmd-Info.plist"; sourceTree = "<group>"; };
 		DD22DF5C1A235F58007FB597 /* DlgExclusiveApps.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = DlgExclusiveApps.cpp; sourceTree = "<group>"; };
 		DD22DF5D1A235F58007FB597 /* DlgExclusiveApps.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = DlgExclusiveApps.h; sourceTree = "<group>"; };
@@ -987,6 +989,7 @@
 		DD25F72315914F8C007845B5 /* gpu_nvidia.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = gpu_nvidia.cpp; sourceTree = "<group>"; };
 		DD25F72415914F8C007845B5 /* gpu_amd.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = gpu_amd.cpp; sourceTree = "<group>"; };
 		DD25F72515914F8C007845B5 /* gpu_opencl.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = gpu_opencl.cpp; sourceTree = "<group>"; };
+		A1B2C3D4E5F60718293A4B01 /* gpu_hip.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = gpu_hip.cpp; sourceTree = "<group>"; };
 		DD25F72615914F8C007845B5 /* gpu_detect.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = gpu_detect.cpp; sourceTree = "<group>"; };
 		DD25F72715914F8C007845B5 /* gpu_detect.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = gpu_detect.h; sourceTree = "<group>"; };
 		DD2B6C7E13149177005D6F3E /* procinfo.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; name = procinfo.cpp; path = ../lib/procinfo.cpp; sourceTree = SOURCE_ROOT; };
@@ -2090,6 +2093,7 @@
 				DDEFB8A3134689C7001E325E /* cl_boinc.h */,
 				DD7475500D86273300860636 /* coproc.cpp */,
 				DD2049DC0D862516009EEE7A /* coproc.h */,
+				A1B2C3D4E5F60718293A4B05 /* hip_boinc.h */,
 				F51DA64D02DB97FF010E292A /* crypt.cpp */,
 				F51DA64E02DB97FF010E292A /* crypt.h */,
 				DD344BA207C5AE5A0043025C /* diagnostics.cpp */,
@@ -2215,6 +2219,7 @@
 				DD3157C016740C9100B6C909 /* gpu_intel.cpp */,
 				DD25F72315914F8C007845B5 /* gpu_nvidia.cpp */,
 				DD25F72515914F8C007845B5 /* gpu_opencl.cpp */,
+				A1B2C3D4E5F60718293A4B01 /* gpu_hip.cpp */,
 				DD33C6F108B5BAF500768630 /* gui_http.cpp */,
 				DD33C6F208B5BAF500768630 /* gui_http.h */,
 				DD344BAD07C5AEB70043025C /* gui_rpc_server.cpp */,
@@ -4281,6 +4286,7 @@
 				DD25F72915914F8C007845B5 /* gpu_amd.cpp in Sources */,
 				DD93854520F609C8008EDE5A /* mac_branding.cpp in Sources */,
 				DD25F72A15914F8C007845B5 /* gpu_opencl.cpp in Sources */,
+				A1B2C3D4E5F60718293A4B02 /* gpu_hip.cpp in Sources */,
 				DD25F72B15914F8C007845B5 /* gpu_detect.cpp in Sources */,
 				DDE17420166746F70059083A /* app_config.cpp in Sources */,
 				DD3157C316740D5300B6C909 /* gpu_intel.cpp in Sources */,

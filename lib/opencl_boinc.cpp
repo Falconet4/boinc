@@ -57,6 +57,8 @@ void OPENCL_DEVICE_PROP::write_xml(MIOFILE& f, const char* tag, bool temp_file) 
         "      <amd_simd_per_compute_unit>%lu</amd_simd_per_compute_unit>\n"
         "      <amd_simd_width>%lu</amd_simd_width>\n"
         "      <amd_simd_instruction_width>%lu</amd_simd_instruction_width>\n"
+        "      <amd_gfxip_major>%lu</amd_gfxip_major>\n"
+        "      <amd_gfxip_minor>%lu</amd_gfxip_minor>\n"
         "      <opencl_platform_version>%s</opencl_platform_version>\n"
         "      <opencl_device_version>%s</opencl_device_version>\n"
         "      <opencl_driver_version>%s</opencl_driver_version>\n",
@@ -80,6 +82,8 @@ void OPENCL_DEVICE_PROP::write_xml(MIOFILE& f, const char* tag, bool temp_file) 
         (unsigned long)amd_simd_per_compute_unit,
         (unsigned long)amd_simd_width,
         (unsigned long)amd_simd_instruction_width,
+        (unsigned long)gfxip_major,
+        (unsigned long)gfxip_minor,
         opencl_platform_version,
         opencl_device_version,
         opencl_driver_version
@@ -157,31 +161,39 @@ int OPENCL_DEVICE_PROP::parse(XML_PARSER& xp, const char* end_tag) {
             continue;
         }
         if (xp.parse_int("max_clock_frequency", n)) {
-            max_clock_frequency = n;
+            if (n >= 0) max_clock_frequency = (cl_uint)n;
             continue;
         }
         if (xp.parse_int("max_compute_units", n)) {
-            max_compute_units = n;
+            if (n >= 0) max_compute_units = (cl_uint)n;
             continue;
         }
         if (xp.parse_int("nv_compute_capability_major", n)) {
-            nv_compute_capability_major = n;
+            if (n >= 0) nv_compute_capability_major = (cl_uint)n;
             continue;
         }
         if (xp.parse_int("nv_compute_capability_minor", n)) {
-            nv_compute_capability_minor = n;
+            if (n >= 0) nv_compute_capability_minor = (cl_uint)n;
             continue;
         }
         if (xp.parse_int("amd_simd_per_compute_unit", n)) {
-            amd_simd_per_compute_unit = n;
+            if (n >= 0) amd_simd_per_compute_unit = (cl_uint)n;
             continue;
         }
         if (xp.parse_int("amd_simd_width", n)) {
-            amd_simd_width = n;
+            if (n >= 0) amd_simd_width = (cl_uint)n;
             continue;
         }
         if (xp.parse_int("amd_simd_instruction_width", n)) {
-            amd_simd_instruction_width = n;
+            if (n >= 0) amd_simd_instruction_width = (cl_uint)n;
+            continue;
+        }
+        if (xp.parse_int("amd_gfxip_major", n)) {
+            if (n >= 0) gfxip_major = (cl_uint)n;
+            continue;
+        }
+        if (xp.parse_int("amd_gfxip_minor", n)) {
+            if (n >= 0) gfxip_minor = (cl_uint)n;
             continue;
         }
         if (xp.parse_str("opencl_platform_version",

@@ -49,6 +49,7 @@ BOINC_OBJ = \
     file_names.o \
     file_xfer.o \
     gpu_amd.o \
+    gpu_hip.o \
     gpu_detect.o \
     gpu_intel.o \
     gpu_nvidia.o \
@@ -109,6 +110,7 @@ SRC = \
     file_names.cpp \
     file_xfer.cpp \
     gpu_amd.cpp \
+    gpu_hip.cpp \
     gpu_detect.cpp \
     gpu_intel.cpp \
     gpu_nvidia.cpp \

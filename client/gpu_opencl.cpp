@@ -270,7 +270,14 @@ void COPROCS::get_opencl(
     int current_CUDA_index;
     int current_CAL_index;
     int min_CAL_target;
-    int num_CAL_devices = (int)ati_gpus.size();
+    // Only count CAL devices: HIP entries also live in ati_gpus, and
+    // treating them as CAL devices would make the CAL/OpenCL matching
+    // below clear the whole vector on a mismatch.
+    //
+    int num_CAL_devices = 0;
+    for (unsigned int i=0; i<ati_gpus.size(); i++) {
+        if (ati_gpus[i].have_cal) num_CAL_devices++;
+    }
     vector<int>devnums_pci_slot_sort;
     vector<OPENCL_DEVICE_PROP>::iterator it;
     int max_other_coprocs = MAX_RSC-1;  // coprocs[0] is reserved for CPU
@@ -656,6 +663,14 @@ void COPROCS::get_opencl(
                     opencl_prop.peak_flops = ati_gpus[opencl_prop.device_num].peak_flops;
                 } else {            // ! ati.have_cal
                     opencl_prop.device_num = (int)(ati_opencls.size());
+                    // The OpenCL clock is often a DPM level, not the boost
+                    // clock.  Use the highest DPM level if it is higher.
+                    // This only applies when there is exactly one AMD GPU.
+                    //
+                    int dpm_clock = amd_max_dpm_clock_mhz(-1);
+                    if (dpm_clock > 0 && (cl_uint)dpm_clock > opencl_prop.max_clock_frequency) {
+                        opencl_prop.max_clock_frequency = (cl_uint)dpm_clock;
+                    }
                     COPROC_ATI c;
                     c.opencl_prop = opencl_prop;
                     c.set_peak_flops();
@@ -836,14 +851,37 @@ void COPROCS::correlate_opencl(
     }
 
     if (ati_opencls.size() > 0) {
-        if (ati.have_cal) { // If CAL already found the "best" CAL GPU
+        if (ati.have_cal || ati.have_hip) {
+            // CAL and HIP enumerate AMD GPUs in PCI order, the same order
+            // the AMD OpenCL runtime uses, so device numbers match.
             ati.merge_opencl(ati_opencls, ignore_gpu_instance[PROC_TYPE_AMD_GPU]);
+            if (ati.have_hip) {
+                if (!ati.gfxip_major) {
+                    ati.gfxip_major = ati.opencl_prop.gfxip_major;
+                    ati.gfxip_minor = ati.opencl_prop.gfxip_minor;
+                }
+                if (!ati.hip_clock_khz) {
+                    ati.hip_clock_khz = ati.opencl_prop.max_clock_frequency*1000;
+                }
+                if (!ati.available_ram) {
+                    ati.available_ram = ati.opencl_prop.opencl_available_ram;
+                }
+                ati.set_peak_flops();
+            }
         } else {
             ati.find_best_opencls(use_all, ati_opencls, ignore_gpu_instance[PROC_TYPE_AMD_GPU]);
             ati.attribs.localRAM = ati.opencl_prop.global_mem_size/MEGA;
             ati.available_ram = ati.opencl_prop.global_mem_size;
             ati.attribs.engineClock = ati.opencl_prop.max_clock_frequency;
             safe_strcpy(ati.name, ati.opencl_prop.name);
+            // Without HIP, the gfx IP version still comes from OpenCL;
+            // use it for the FP64 and matrix estimates.
+            //
+            if (!ati.gfxip_major) {
+                ati.gfxip_major = ati.opencl_prop.gfxip_major;
+                ati.gfxip_minor = ati.opencl_prop.gfxip_minor;
+            }
+            ati.set_peak_flops();
         }
     }
 
@@ -1149,6 +1187,19 @@ cl_int COPROCS::get_opencl_info(
             );
             gpu_warning(warnings, buf);
             return ciErrNum;
+        }
+
+        // Graphics IP version; used to tell GCN/RDNA 1-2 from RDNA 3+,
+        // which dual-issues FP32.  Older drivers may not support these
+        // queries; treat a failure as "unknown" rather than aborting.
+        //
+        ciErrNum = (*p_clGetDeviceInfo)(prop.device_id, CL_DEVICE_GFXIP_MAJOR_AMD, sizeof(prop.gfxip_major), &prop.gfxip_major, NULL);
+        if (ciErrNum != CL_SUCCESS) {
+            prop.gfxip_major = 0;
+        }
+        ciErrNum = (*p_clGetDeviceInfo)(prop.device_id, CL_DEVICE_GFXIP_MINOR_AMD, sizeof(prop.gfxip_minor), &prop.gfxip_minor, NULL);
+        if (ciErrNum != CL_SUCCESS) {
+            prop.gfxip_minor = 0;
         }
 
     }

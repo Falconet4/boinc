@@ -54,6 +54,7 @@ HEADERS = $(BOINC_SRC)/version.h \
 	$(BOINC_SRC)/lib/diagnostics_win.h \
 	$(BOINC_SRC)/lib/error_numbers.h \
 	$(BOINC_SRC)/lib/filesys.h \
+	$(BOINC_SRC)/lib/hip_boinc.h \
 	$(BOINC_SRC)/lib/hostinfo.h \
 	$(BOINC_SRC)/lib/mfile.h  \
 	$(BOINC_SRC)/lib/miofile.h \

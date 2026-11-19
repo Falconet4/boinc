@@ -98,6 +98,11 @@
 #include <signal.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <cstdlib>
+#ifdef __linux__
+#include <dirent.h>
+#include <cctype>
+#endif
 #endif
 
 #include "coproc.h"
@@ -194,10 +199,18 @@ void COPROCS::detect_gpus(vector<string> &warnings) {
     }
 #endif
     try {
-        ati.get(warnings);
+        ati.get_hip(warnings);
     }
     catch (...) {
-        gpu_warning(warnings, "Caught SIGSEGV in ATI GPU detection");
+        gpu_warning(warnings, "Caught SIGSEGV in HIP GPU detection");
+    }
+    if (ati_gpus.empty()) {
+        try {
+            ati.get(warnings);
+        }
+        catch (...) {
+            gpu_warning(warnings, "Caught SIGSEGV in ATI GPU detection");
+        }
     }
     try {
         // OpenCL detection must come last
@@ -216,11 +229,18 @@ void COPROCS::detect_gpus(vector<string> &warnings) {
     }
 
 
-#ifndef __APPLE__       // ATI does not yet support CAL on Macs
+#ifndef __APPLE__       // no CAL or HIP on Macs
     if (setjmp(resume)) {
-        gpu_warning(warnings, "Caught SIGSEGV in ATI GPU detection");
+        gpu_warning(warnings, "Caught SIGSEGV in HIP GPU detection");
     } else {
-        ati.get(warnings);
+        ati.get_hip(warnings);
+    }
+    if (ati_gpus.empty()) {
+        if (setjmp(resume)) {
+            gpu_warning(warnings, "Caught SIGSEGV in ATI GPU detection");
+        } else {
+            ati.get(warnings);
+        }
     }
 #else
     apple_gpu.get(warnings);
@@ -310,20 +330,23 @@ void COPROCS::correlate_gpus(
         switch(ati_gpus[i].is_used) {
         case COPROC_IGNORED:
             snprintf(buf2, sizeof(buf2),
-                "CAL: ATI GPU %d (ignored by config): %s",
+                "%s: ATI GPU %d (ignored by config): %s",
+                ati_gpus[i].have_hip ? "HIP" : "CAL",
                 ati_gpus[i].device_num, buf
             );
             break;
         case COPROC_USED:
             snprintf(buf2, sizeof(buf2),
-                "CAL: ATI GPU %d: %s",
+                "%s: ATI GPU %d: %s",
+                ati_gpus[i].have_hip ? "HIP" : "CAL",
                 ati_gpus[i].device_num, buf
             );
             break;
         case COPROC_UNUSED:
         default:
             snprintf(buf2, sizeof(buf2),
-                "CAL: ATI GPU %d: (not used) %s",
+                "%s: ATI GPU %d: (not used) %s",
+                ati_gpus[i].have_hip ? "HIP" : "CAL",
                 ati_gpus[i].device_num, buf
             );
             break;
@@ -820,6 +843,141 @@ void COPROCS::bound_counts() {
             coprocs[j].count = MAX_COPROC_INSTANCES;
         }
     }
+}
+
+#ifdef __linux__
+static bool is_drm_card_entry(const char* name) {
+    if (strncmp(name, "card", 4)) return false;
+    if (!name[4]) return false;
+    for (const char* p = name+4; *p; p++) {
+        if (!isdigit((unsigned char)*p)) return false;
+    }
+    return true;
+}
+
+// Parse lines such as "1: 3229Mhz" and return the largest value.
+//
+static int max_mhz_in_file(const char* path) {
+    FILE* f = fopen(path, "r");
+    if (!f) return -1;
+    char buf[128];
+    int best = -1;
+    while (fgets(buf, sizeof(buf), f)) {
+        const char* p = strchr(buf, ':');
+        if (!p) continue;
+        int v = atoi(p+1);
+        if (v > best) best = v;
+    }
+    fclose(f);
+    return best;
+}
+
+static bool is_amd_card(const char* card_name) {
+    char path[512], buf[128];
+    snprintf(path, sizeof(path),
+        "/sys/class/drm/%s/device/vendor", card_name
+    );
+    FILE* f = fopen(path, "r");
+    if (!f) return false;
+    bool is_amd = fgets(buf, sizeof(buf), f)
+        && strtol(buf, NULL, 16) == 0x1002;
+    fclose(f);
+    return is_amd;
+}
+
+// PCI bus number of a DRM card, or -1.
+//
+static int card_pci_bus(const char* card_name) {
+    char path[512], buf[128];
+    snprintf(path, sizeof(path),
+        "/sys/class/drm/%s/device/uevent", card_name
+    );
+    FILE* f = fopen(path, "r");
+    if (!f) return -1;
+    int bus = -1;
+    while (fgets(buf, sizeof(buf), f)) {
+        const char* p = strstr(buf, "PCI_SLOT_NAME=");
+        if (p) {
+            const char* c = strchr(p, ':');
+            if (c) bus = (int)strtol(c+1, NULL, 16);
+        }
+    }
+    fclose(f);
+    return bus;
+}
+
+// Highest DPM level of the card at this PCI bus.
+//
+static int dpm_clock_for_bus(int bus) {
+    DIR* d = opendir("/sys/class/drm");
+    if (!d) return -1;
+    int best = -1;
+    struct dirent* e;
+    while ((e = readdir(d)) != NULL) {
+        if (!is_drm_card_entry(e->d_name)) continue;
+        if (!is_amd_card(e->d_name)) continue;
+        if (card_pci_bus(e->d_name) != bus) continue;
+        char path[512];
+        snprintf(path, sizeof(path),
+            "/sys/class/drm/%s/device/pp_dpm_sclk", e->d_name
+        );
+        best = max_mhz_in_file(path);
+        break;
+    }
+    closedir(d);
+    return best;
+}
+
+// PCI bus of the only AMD GPU, or -1 if there is none or more than one.
+//
+static int single_amd_gpu_bus() {
+    DIR* d = opendir("/sys/class/drm");
+    if (!d) return -1;
+    int found = 0;
+    int bus = -1;
+    struct dirent* e;
+    while ((e = readdir(d)) != NULL) {
+        if (!is_drm_card_entry(e->d_name)) continue;
+        if (!is_amd_card(e->d_name)) continue;
+        found++;
+        bus = card_pci_bus(e->d_name);
+    }
+    closedir(d);
+    return (found == 1) ? bus : -1;
+}
+#endif
+
+int amd_max_dpm_clock_mhz(int pci_bus) {
+#ifdef __linux__
+    // Resolve "any single GPU" to a bus, so the HIP and OpenCL paths share
+    // one memoized value within a detection run.
+    //
+    if (pci_bus < 0) {
+        pci_bus = single_amd_gpu_bus();
+        if (pci_bus < 0) return -1;
+    }
+
+    static int cached_bus = -1;
+    static int cached_mhz = -1;
+    if (pci_bus == cached_bus) return cached_mhz;
+
+    // The DPM table is dynamic: it can show a reduced top level while the
+    // GPU is powered down or power-capped.  Sample it a few times and keep
+    // the highest value.
+    //
+    int best = -1;
+    for (int i=0; i<3; i++) {
+        int v = dpm_clock_for_bus(pci_bus);
+        if (v > best) best = v;
+        if (i < 2) boinc_sleep(0.01);
+    }
+    cached_bus = pci_bus;
+    cached_mhz = best;
+    return best;
+#else
+    (void)pci_bus;
+    return -1;
+#endif
 }
 
 void gpu_warning(vector<string> &warnings, const char* msg) {

@@ -82,6 +82,7 @@ boinc_client_SOURCES = \
     file_names.cpp \
     file_xfer.cpp \
     gpu_amd.cpp \
+    gpu_hip.cpp \
     gpu_detect.cpp \
     gpu_intel.cpp \
     gpu_nvidia.cpp \

@@ -33,6 +33,7 @@ OBJS = \
 	file_names.o \
 	file_xfer.o \
 	gpu_amd.o \
+	gpu_hip.o \
 	gpu_detect.o \
 	gpu_intel.o \
 	gpu_nvidia.o \

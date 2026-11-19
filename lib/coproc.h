@@ -163,6 +163,8 @@ struct COPROC {
     int count;          // how many are present
     bool non_gpu;       // coproc is not a GPU
     double peak_flops;
+    double peak_flops_dp;   // estimated double-precision peak; 0 if unknown
+    bool have_fp64;         // device supports double precision
     double used;        // how many are in use (used by client)
     bool have_cuda;     // this GPU supports CUDA
     bool have_cal;      // this GPU supports CAL
@@ -342,12 +344,31 @@ struct COPROC_ATI : public COPROC {
     CALdeviceattribs attribs;
     CALdeviceinfo info;
 
+    // ROCm/HIP
+    //
+    bool have_hip;
+    int hip_version;            // HIP runtime version, e.g. 60200
+    int hip_device_num;         // HIP ordinal
+    int hip_cu_count;
+    int hip_lane_count;         // total FP32 lanes, if known
+    int hip_warp_size;
+    int hip_clock_khz;
+    int hip_memory_clock_khz;
+    int hip_memory_bus_width;
+    int pci_bus;
+    char pci_bus_id[32];
+    int gfx_target_version;     // e.g. 120000; 0 if unknown
+    int gfxip_major;            // 10 = RDNA 1/2, 11 = RDNA 3, 12 = RDNA 4
+    int gfxip_minor;
+    char gcn_arch[64];          // e.g. "gfx1200"
+
 #ifndef _USING_FCGI_
     void write_xml(MIOFILE&, bool scheduler_rpc);
 #endif
     COPROC_ATI(int): COPROC() {}
     COPROC_ATI(): COPROC() {clear();}
     void get(std::vector<std::string>& warnings);
+    void get_hip(std::vector<std::string>& warnings);
     void correlate(
         bool use_all,
         std::vector<int>& ignore_devs

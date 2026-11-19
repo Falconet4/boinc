@@ -66,6 +66,9 @@ struct OPENCL_DEVICE_PROP {
     cl_uint amd_simd_per_compute_unit;
     cl_uint amd_simd_width;
     cl_uint amd_simd_instruction_width;
+    cl_uint gfxip_major;                // CL_DEVICE_GFXIP_MAJOR_AMD
+        // 10 = RDNA 1/2, 11 = RDNA 3, 12 = RDNA 4, 0 = unknown
+    cl_uint gfxip_minor;
 
     char opencl_platform_version[64];   // Version of OpenCL supported
                                         // the device's platform

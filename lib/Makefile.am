@@ -192,6 +192,7 @@ endif
 
 # These are used internally and are not meant to be installed
 noinst_HEADERS = \
+    hip_boinc.h \
     msg_queue.h \
     shmem.h \
     synch.h \
