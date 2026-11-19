@@ -64,7 +64,11 @@ size_t strlcpy(char *dst, const char *src, size_t size) {
 
 #if !HAVE_STRLCAT
 size_t strlcat(char *dst, const char *src, size_t size) {
-    size_t dst_len = strlen(dst);
+    // Scan dst only within the provided buffer.  strlen(dst) would read
+    // past the end if the caller supplied an unterminated buffer.
+    //
+    size_t dst_len = 0;
+    while (dst_len < size && dst[dst_len]) dst_len++;
     size_t src_len = strlen(src);
 
     // If dst is not null-terminated within size, the standard says to
