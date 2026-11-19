@@ -295,12 +295,47 @@ static bool amd_select_devices(
     return true;
 }
 
+// Select the vendor devices matching req and build a representative COPROC
+// describing the fastest match.  Returns false if none matches.  Leaves the
+// aggregate untouched when the client reports no per-device list.
+//
+template <typename T>
+static bool gpu_select_devices(
+    const GPU_DEVICE_REQUIREMENTS& req,
+    const std::vector<GPU_DEVICE>& devices, const COPROC& cp,
+    HOST_USAGE& hu, T& cp_dev, GPU_DEVICE& best,
+    double& gpu_ram_min, bool& per_device
+) {
+    per_device = !devices.empty();
+    hu.n_gpu_device_nums = 0;
+    if (!per_device) return true;
+
+    int best_index = -1;
+    int n_matches = gpu_matching_devices(
+        req, devices, cp, hu.gpu_device_nums, MAX_COPROC_INSTANCES,
+        best_index, gpu_ram_min
+    );
+    hu.n_gpu_device_nums = n_matches;
+    if (!n_matches) return false;
+    best = devices[best_index];
+
+    cp_dev.count = 1;
+    cp_dev.available_ram = gpu_ram_min;
+    cp_dev.have_fp64 = best.have_fp64;
+    cp_dev.peak_flops = best.peak_flops;
+    cp_dev.peak_flops_dp = best.peak_flops_dp;
+    return true;
+}
+
 bool PLAN_CLASS_SPEC::check(
     SCHEDULER_REQUEST& sreq, HOST_USAGE& hu, const WORKUNIT* wu
 ) {
     COPROC* cpp = NULL;
     COPROC_ATI cp_dev;
     COPROC_ATI_DEVICE best_dev;
+    COPROC_NVIDIA cp_dev_n;
+    COPROC_INTEL cp_dev_i;
+    COPROC_APPLE cp_dev_a;
     bool per_device = false;
     double gpu_ram_min = 0;
     bool can_use_multicore = true;
@@ -900,6 +935,36 @@ bool PLAN_CLASS_SPEC::check(
         // in analogy to ATI/AMD
         driver_version=cp.display_driver_version;
 
+        GPU_DEVICE_REQUIREMENTS vreq;
+        vreq.min_compcap = min_nvidia_compcap;
+        vreq.max_compcap = max_nvidia_compcap;
+        if (cuda) {
+            vreq.min_cuda_version = min_cuda_version;
+            vreq.max_cuda_version = max_cuda_version;
+        }
+        vreq.require_fp64 = require_fp64;
+        vreq.min_gpu_dp_flops = min_gpu_dp_flops;
+        vreq.min_gpu_ram_mb = min_gpu_ram_mb;
+        vreq.min_gpu_peak_flops = min_gpu_peak_flops;
+        vreq.max_gpu_peak_flops = max_gpu_peak_flops;
+        GPU_DEVICE best_gpu;
+        if (!gpu_select_devices(
+            vreq, cp.devices, cp, hu, cp_dev_n, best_gpu, gpu_ram_min,
+            per_device
+        )) {
+            return false;
+        }
+        if (per_device) {
+            safe_strcpy(cp_dev_n.cuda_prop.name, best_gpu.name);
+            cp_dev_n.cuda_prop.major = best_gpu.compcap_major;
+            cp_dev_n.cuda_prop.minor = best_gpu.compcap_minor;
+            cp_dev_n.cuda_prop.totalGlobalMem = gpu_ram_min;
+            cp_dev_n.cuda_version = best_gpu.cuda_version;
+            cp_dev_n.display_driver_version = best_gpu.driver_version;
+            cpp = &cp_dev_n;
+            gpu_ram = gpu_ram_min;
+        }
+
         if (min_gpu_ram_mb) {
             gpu_requirements[PROC_TYPE_NVIDIA_GPU].update(0, min_gpu_ram_mb * MEGA);
         }
@@ -975,6 +1040,32 @@ bool PLAN_CLASS_SPEC::check(
             }
             return false;
         }
+        GPU_DEVICE_REQUIREMENTS vreq;
+        vreq.require_fp64 = require_fp64;
+        vreq.min_gpu_dp_flops = min_gpu_dp_flops;
+        vreq.min_gpu_ram_mb = min_gpu_ram_mb;
+        vreq.min_gpu_peak_flops = min_gpu_peak_flops;
+        vreq.max_gpu_peak_flops = max_gpu_peak_flops;
+        GPU_DEVICE best_gpu;
+        if (!gpu_select_devices(
+            vreq, sreq.coprocs.intel_gpu.devices, cp, hu, cp_dev_i,
+            best_gpu, gpu_ram_min, per_device
+        )) {
+            return false;
+        }
+        if (per_device) {
+            cp_dev_i = sreq.coprocs.intel_gpu;
+            cp_dev_i.count = 1;
+            cp_dev_i.available_ram = gpu_ram_min;
+            cp_dev_i.peak_flops = best_gpu.peak_flops;
+            cp_dev_i.peak_flops_dp = best_gpu.peak_flops_dp;
+            cp_dev_i.have_fp64 = best_gpu.have_fp64;
+            safe_strcpy(cp_dev_i.opencl_prop.name, best_gpu.name);
+            cp_dev_i.opencl_prop.global_mem_size = gpu_ram_min;
+            cpp = &cp_dev_i;
+            gpu_ram = gpu_ram_min;
+        }
+
         if (min_gpu_ram_mb) {
             gpu_requirements[PROC_TYPE_INTEL_GPU].update(0, min_gpu_ram_mb * MEGA);
         }
@@ -1007,6 +1098,32 @@ bool PLAN_CLASS_SPEC::check(
             }
             return false;
         }
+        GPU_DEVICE_REQUIREMENTS vreq;
+        vreq.min_metal_support = min_metal_support;
+        vreq.require_fp64 = require_fp64;
+        vreq.min_gpu_dp_flops = min_gpu_dp_flops;
+        vreq.min_gpu_ram_mb = min_gpu_ram_mb;
+        vreq.min_gpu_peak_flops = min_gpu_peak_flops;
+        vreq.max_gpu_peak_flops = max_gpu_peak_flops;
+        GPU_DEVICE best_gpu;
+        if (!gpu_select_devices(
+            vreq, sreq.coprocs.apple_gpu.devices, cp, hu, cp_dev_a,
+            best_gpu, gpu_ram_min, per_device
+        )) {
+            return false;
+        }
+        if (per_device) {
+            cp_dev_a = sreq.coprocs.apple_gpu;
+            cp_dev_a.count = 1;
+            cp_dev_a.available_ram = gpu_ram_min;
+            cp_dev_a.peak_flops = best_gpu.peak_flops;
+            safe_strcpy(cp_dev_a.model, best_gpu.name);
+            cp_dev_a.metal_support = best_gpu.metal_support;
+            cp_dev_a.ncores = best_gpu.ncores;
+            cpp = &cp_dev_a;
+            gpu_ram = gpu_ram_min;
+        }
+
         if (min_gpu_ram_mb) {
             gpu_requirements[PROC_TYPE_APPLE_GPU].update(0, min_gpu_ram_mb * MEGA);
         }

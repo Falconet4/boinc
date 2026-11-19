@@ -594,30 +594,109 @@ void COPROC_NVIDIA::correlate(
         }
     }
 
-    // see which other instances are equivalent,
-    // and set "count", "device_nums", and "pci_infos"
+    // Report every usable instance individually.  The aggregate below is
+    // still used for old clients; the scheduler can target a subset.
+    //
+    devices.clear();
+    for (i=0; i<nvidia_gpus.size(); i++) {
+        COPROC_NVIDIA& d = nvidia_gpus[i];
+        if (in_vector(d.device_num, ignore_devs)) continue;
+        if (this->have_opencl && !d.have_opencl) continue;
+        if (this->have_cuda && !d.have_cuda) continue;
+#ifdef __APPLE__
+        if ((d.cuda_version >= 6050) && d.cuda_prop.major < 2) continue;
+#endif
+        GPU_DEVICE g;
+        safe_strcpy(g.vendor, "nvidia");
+        safe_strcpy(g.name, d.cuda_prop.name);
+        if (!g.name[0]) safe_strcpy(g.name, d.opencl_prop.name);
+        g.device_num = d.device_num;
+        g.compcap_major = d.cuda_prop.major;
+        g.compcap_minor = d.cuda_prop.minor;
+        g.cuda_version = d.cuda_version;
+        g.driver_version = d.display_driver_version;
+        g.opencl_version = d.opencl_prop.opencl_device_version_int;
+        g.have_fp64 = d.have_fp64;
+        g.peak_flops = d.peak_flops;
+        g.peak_flops_dp = d.peak_flops_dp;
+        g.total_ram = d.cuda_prop.totalGlobalMem;
+        if (!g.total_ram) {
+            g.total_ram = (double)d.opencl_prop.global_mem_size;
+        }
+        if (devices.size() < MAX_COPROC_INSTANCES) {
+            devices.push_back(g);
+        }
+    }
+
+    // Include every usable instance, not only the equivalent ones.  The
+    // scheduler can target a subset by device number; old servers see a
+    // conservative aggregate.
     //
     count = 0;
+    bool all_fp64 = true, all_cuda = true, all_opencl = true;
+    bool first_used = true;
+    double min_dp = 0, min_total = 0, min_free = 0, max_peak = 0;
+    (void)use_all;      // NVIDIA now reports every usable device
     for (i=0; i<nvidia_gpus.size(); i++) {
-        if (in_vector(nvidia_gpus[i].device_num, ignore_devs)) {
-            nvidia_gpus[i].is_used = COPROC_IGNORED;
-        } else if (this->have_opencl && !nvidia_gpus[i].have_opencl) {
-            nvidia_gpus[i].is_used = COPROC_UNUSED;
-        } else if (this->have_cuda && !nvidia_gpus[i].have_cuda) {
-            nvidia_gpus[i].is_used = COPROC_UNUSED;
-#ifdef __APPLE__
-        } else if (nvidia_gpus[i].is_used == COPROC_UNUSED) {
-            // Can't use GPUs with compute capability < 2 with CUDA drivers >= 6.5.x
+        COPROC_NVIDIA& d = nvidia_gpus[i];
+        if (in_vector(d.device_num, ignore_devs)) {
+            d.is_used = COPROC_IGNORED;
             continue;
-#endif
-        } else if (use_all || !nvidia_compare(nvidia_gpus[i], *this, true)) {
-            device_nums[count] = nvidia_gpus[i].device_num;
-            pci_infos[count] = nvidia_gpus[i].pci_info;
-            count++;
-            nvidia_gpus[i].is_used = COPROC_USED;
-        } else {
-            nvidia_gpus[i].is_used = COPROC_UNUSED;
         }
+        if (this->have_opencl && !d.have_opencl) {
+            d.is_used = COPROC_UNUSED;
+            continue;
+        }
+        if (this->have_cuda && !d.have_cuda) {
+            d.is_used = COPROC_UNUSED;
+            continue;
+        }
+#ifdef __APPLE__
+        if ((d.cuda_version >= 6050) && d.cuda_prop.major < 2) {
+            d.is_used = COPROC_UNUSED;
+            continue;
+        }
+#endif
+        if (count >= MAX_COPROC_INSTANCES) {
+            d.is_used = COPROC_UNUSED;
+            continue;
+        }
+        device_nums[count] = d.device_num;
+        pci_infos[count] = d.pci_info;
+        count++;
+        d.is_used = COPROC_USED;
+
+        if (first_used) {
+            min_dp = d.peak_flops_dp;
+            min_total = d.cuda_prop.totalGlobalMem;
+            min_free = d.available_ram;
+            max_peak = d.peak_flops;
+            first_used = false;
+        } else {
+            if (d.peak_flops_dp < min_dp) min_dp = d.peak_flops_dp;
+            if (d.cuda_prop.totalGlobalMem < min_total) {
+                min_total = d.cuda_prop.totalGlobalMem;
+            }
+            if (d.available_ram < min_free) min_free = d.available_ram;
+            if (d.peak_flops > max_peak) max_peak = d.peak_flops;
+        }
+        if (!d.have_fp64) all_fp64 = false;
+        if (!d.have_cuda) all_cuda = false;
+        if (!d.have_opencl) all_opencl = false;
+    }
+
+    count = (count > MAX_COPROC_INSTANCES) ? MAX_COPROC_INSTANCES : count;
+    if (count) {
+        have_fp64 = all_fp64;
+        peak_flops_dp = all_fp64? min_dp : 0;
+        cuda_prop.totalGlobalMem = min_total;
+        // available_ram is free VRAM (legacy app_plan checks compare
+        // against it), so keep the minimum free amount, not the total.
+        //
+        if (min_free) available_ram = min_free;
+        peak_flops = max_peak;
+        have_cuda = all_cuda;
+        have_opencl = all_opencl;
     }
 }
 

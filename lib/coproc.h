@@ -304,10 +304,49 @@ struct CUDA_DEVICE_PROP {
 
 typedef int CUdevice;
 
+// One physical GPU as reported by a vendor API or OpenCL.  Used for the
+// per-device list of NVIDIA, Intel and Apple GPUs; AMD has its own richer
+// record.  Fields not relevant to a vendor stay zero.
+//
+struct GPU_DEVICE {
+    char name[256];
+    char vendor[32];
+    int device_num;
+    int compcap_major;      // NVIDIA compute capability
+    int compcap_minor;
+    int cuda_version;       // NVIDIA runtime version
+    int driver_version;     // vendor driver version
+    int opencl_version;     // encoded e.g. 201
+    int metal_support;      // Apple
+    int ncores;             // Apple
+    bool have_fp64;
+    double peak_flops;
+    double peak_flops_dp;
+    double total_ram;       // bytes; total, not free
+
+    void clear() {
+        name[0] = 0;
+        vendor[0] = 0;
+        device_num = -1;
+        compcap_major = compcap_minor = 0;
+        cuda_version = 0;
+        driver_version = 0;
+        opencl_version = 0;
+        metal_support = 0;
+        ncores = 0;
+        have_fp64 = false;
+        peak_flops = 0;
+        peak_flops_dp = 0;
+        total_ram = 0;
+    }
+    GPU_DEVICE() { clear(); }
+};
+
 struct COPROC_NVIDIA : public COPROC {
     int cuda_version;  // CUDA runtime version
     int display_driver_version;
     CUDA_DEVICE_PROP cuda_prop;
+    std::vector<GPU_DEVICE> devices;
 
 #ifndef _USING_FCGI_
     void write_xml(MIOFILE&, bool scheduler_rpc);
@@ -451,6 +490,7 @@ struct COPROC_ATI : public COPROC {
 };
 
 struct COPROC_INTEL : public COPROC {
+    std::vector<GPU_DEVICE> devices;
 #ifndef _USING_FCGI_
     void write_xml(MIOFILE&, bool scheduler_rpc);
 #endif
@@ -464,6 +504,7 @@ struct COPROC_INTEL : public COPROC {
 
 struct COPROC_APPLE : public COPROC {
     char model[256];    // from metal, else OpenCL
+    std::vector<GPU_DEVICE> devices;
 
     // Metal info:
     int ncores;
@@ -500,6 +541,7 @@ struct COPROCS {
     COPROC_APPLE apple_gpu;
 
     void write_xml(MIOFILE& out, bool scheduler_rpc);
+    void devices_string_json(std::string& out);
     void get(
         bool use_all,
         std::vector<std::string> &descs,
@@ -644,5 +686,9 @@ extern void summary_json(
     const char* driver_version, int opencl_version,
     bool have_hip, const char* gcn_arch, int hip_version
 );
+
+// Write one physical device as a JSON object into buf.
+//
+extern void device_json(char* buf, size_t len, const GPU_DEVICE& d);
 
 #endif
