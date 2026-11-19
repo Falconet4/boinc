@@ -85,7 +85,11 @@ static void auth_failure(MIOFILE& fout) {
 }
 
 void GUI_RPC_CONN::handle_auth1(MIOFILE& fout) {
-    snprintf(nonce, sizeof(nonce), "%f", dtime());
+    // A predictable nonce lets an attacker who can see one challenge precompute
+    // the reply for a guessed password.  Use the OS RNG, falling back to the
+    // host-info one, rather than the clock.
+    //
+    make_secure_random_string(nonce);
     fout.printf("<nonce>%s</nonce>\n", nonce);
 }
 
