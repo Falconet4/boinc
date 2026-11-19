@@ -565,6 +565,42 @@ leave:
 // set is_used (USED, UNUSED, IGNORED) for each instance.
 // Don't use less-capable instances (unless use_all is set)
 //
+// Build the per-device report from nvidia_gpus.  Every usable instance is
+// included; the scheduler can then target a subset by device number.
+//
+void COPROC_NVIDIA::build_devices(vector<int>& ignore_devs) {
+    devices.clear();
+    for (unsigned int i=0; i<nvidia_gpus.size(); i++) {
+        COPROC_NVIDIA& d = nvidia_gpus[i];
+        if (in_vector(d.device_num, ignore_devs)) continue;
+        if (have_opencl && !d.have_opencl) continue;
+        if (have_cuda && !d.have_cuda) continue;
+#ifdef __APPLE__
+        if ((d.cuda_version >= 6050) && d.cuda_prop.major < 2) continue;
+#endif
+        GPU_DEVICE g;
+        safe_strcpy(g.vendor, "nvidia");
+        safe_strcpy(g.name, d.cuda_prop.name);
+        if (!g.name[0]) safe_strcpy(g.name, d.opencl_prop.name);
+        g.device_num = d.device_num;
+        g.compcap_major = d.cuda_prop.major;
+        g.compcap_minor = d.cuda_prop.minor;
+        g.cuda_version = d.cuda_version;
+        g.driver_version = d.display_driver_version;
+        g.opencl_version = d.opencl_prop.opencl_device_version_int;
+        g.have_fp64 = d.have_fp64;
+        g.peak_flops = d.peak_flops;
+        g.peak_flops_dp = d.peak_flops_dp;
+        g.total_ram = d.cuda_prop.totalGlobalMem;
+        if (!g.total_ram) {
+            g.total_ram = (double)d.opencl_prop.global_mem_size;
+        }
+        if (devices.size() < MAX_COPROC_INSTANCES) {
+            devices.push_back(g);
+        }
+    }
+}
+
 void COPROC_NVIDIA::correlate(
     bool use_all,    // if false, use only those equivalent to most capable
     vector<int>& ignore_devs
@@ -600,35 +636,7 @@ void COPROC_NVIDIA::correlate(
     // only when the vector was filled directly (e.g. the test harness).
     //
     if (devices.empty()) {
-    for (i=0; i<nvidia_gpus.size(); i++) {
-        COPROC_NVIDIA& d = nvidia_gpus[i];
-        if (in_vector(d.device_num, ignore_devs)) continue;
-        if (this->have_opencl && !d.have_opencl) continue;
-        if (this->have_cuda && !d.have_cuda) continue;
-#ifdef __APPLE__
-        if ((d.cuda_version >= 6050) && d.cuda_prop.major < 2) continue;
-#endif
-        GPU_DEVICE g;
-        safe_strcpy(g.vendor, "nvidia");
-        safe_strcpy(g.name, d.cuda_prop.name);
-        if (!g.name[0]) safe_strcpy(g.name, d.opencl_prop.name);
-        g.device_num = d.device_num;
-        g.compcap_major = d.cuda_prop.major;
-        g.compcap_minor = d.cuda_prop.minor;
-        g.cuda_version = d.cuda_version;
-        g.driver_version = d.display_driver_version;
-        g.opencl_version = d.opencl_prop.opencl_device_version_int;
-        g.have_fp64 = d.have_fp64;
-        g.peak_flops = d.peak_flops;
-        g.peak_flops_dp = d.peak_flops_dp;
-        g.total_ram = d.cuda_prop.totalGlobalMem;
-        if (!g.total_ram) {
-            g.total_ram = (double)d.opencl_prop.global_mem_size;
-        }
-        if (devices.size() < MAX_COPROC_INSTANCES) {
-            devices.push_back(g);
-        }
-    }
+        build_devices(ignore_devs);
     }
 
     // Include every usable instance, not only the equivalent ones.  The
