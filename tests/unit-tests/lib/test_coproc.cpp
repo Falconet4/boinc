@@ -132,6 +132,96 @@ TEST(test_coproc, parse_device_num_list) {
     EXPECT_EQ(n, 0);
 }
 
+// The wire type must stay "ATI" for compatibility with older peers, while
+// the user-visible name is "AMD GPU".
+//
+// The NVIDIA/Intel/Apple device lists must survive the write/parse round
+// trip that the child-process detection path uses.
+//
+TEST(test_coproc, vendor_device_roundtrip) {
+    COPROC_NVIDIA nv;
+    nv.clear();
+    nv.count = 1;
+    GPU_DEVICE g;
+    strcpy(g.vendor, "nvidia");
+    strcpy(g.name, "Tesla V100");
+    g.device_num = 0;
+    g.compcap_major = 7;
+    g.compcap_minor = 0;
+    g.cuda_version = 9000;
+    g.driver_version = 440000;
+    g.have_fp64 = true;
+    g.peak_flops = 15.7e12;
+    g.peak_flops_dp = 7.8e12;
+    g.total_ram = 32e9;
+    nv.devices.push_back(g);
+    g.clear();
+    strcpy(g.vendor, "nvidia");
+    strcpy(g.name, "RTX 4090");
+    g.device_num = 1;
+    g.compcap_major = 8;
+    g.compcap_minor = 9;
+    g.have_fp64 = true;
+    g.total_ram = 24e9;
+    nv.devices.push_back(g);
+
+    char buf[8192];
+    MIOFILE w;
+    w.init_buf_write(buf, sizeof(buf));
+    nv.write_xml(w, false);
+    MIOFILE r;
+    r.init_buf_read(buf);
+    XML_PARSER xp(&r);
+    ASSERT_TRUE(xp.parse_start("coproc_cuda"));
+    COPROC_NVIDIA back;
+    ASSERT_EQ(back.parse(xp), 0);
+    ASSERT_EQ(back.devices.size(), 2u);
+    EXPECT_STREQ(back.devices[0].name, "Tesla V100");
+    EXPECT_EQ(back.devices[0].compcap_major, 7);
+    EXPECT_EQ(back.devices[0].cuda_version, 9000);
+    EXPECT_DOUBLE_EQ(back.devices[0].total_ram, 32e9);
+    EXPECT_STREQ(back.devices[1].name, "RTX 4090");
+    EXPECT_EQ(back.devices[1].compcap_minor, 9);
+}
+
+TEST(test_coproc, intel_device_roundtrip) {
+    COPROC_INTEL ig;
+    ig.clear();
+    ig.count = 1;
+    GPU_DEVICE g;
+    strcpy(g.vendor, "intel");
+    strcpy(g.name, "Intel Arc A770");
+    g.device_num = 0;
+    g.opencl_version = 300;
+    g.have_fp64 = true;
+    g.peak_flops = 19.6e12;
+    g.peak_flops_dp = 2.4e12;
+    g.total_ram = 16e9;
+    ig.devices.push_back(g);
+
+    char buf[8192];
+    MIOFILE w;
+    w.init_buf_write(buf, sizeof(buf));
+    ig.write_xml(w, false);
+    MIOFILE r;
+    r.init_buf_read(buf);
+    XML_PARSER xp(&r);
+    ASSERT_TRUE(xp.parse_start("coproc_intel_gpu"));
+    COPROC_INTEL back;
+    ASSERT_EQ(back.parse(xp), 0);
+    ASSERT_EQ(back.devices.size(), 1u);
+    EXPECT_STREQ(back.devices[0].name, "Intel Arc A770");
+    EXPECT_EQ(back.devices[0].opencl_version, 300);
+    EXPECT_DOUBLE_EQ(back.devices[0].total_ram, 16e9);
+}
+
+TEST(test_coproc, amd_type_names) {
+    EXPECT_STREQ(proc_type_name_xml(PROC_TYPE_AMD_GPU), "ATI");
+    EXPECT_STREQ(proc_type_name(PROC_TYPE_AMD_GPU), "AMD GPU");
+    EXPECT_EQ(coproc_type_name_to_num("ATI"), PROC_TYPE_AMD_GPU);
+    EXPECT_EQ(coproc_type_name_to_num("AMD GPU"), -1);
+}
+
 TEST(test_coproc, device_num_allowed) {
     int nums[] = {0, 2};
     EXPECT_TRUE(device_num_allowed(NULL, 0, 1));   // no restriction

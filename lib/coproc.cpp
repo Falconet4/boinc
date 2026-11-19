@@ -1295,7 +1295,7 @@ int COPROC_ATI::parse(XML_PARSER& xp) {
             if (!available_ram) {
                 available_ram = attribs.localRAM*MEGA;
             }
-            check_count("ATI");
+            check_count("AMD");
             return 0;
         }
         if (xp.parse_int("count", count)) continue;
@@ -1931,7 +1931,7 @@ const char* proc_type_name(int pt) {
     switch(pt) {
     case PROC_TYPE_CPU: return "CPU";
     case PROC_TYPE_NVIDIA_GPU: return "NVIDIA GPU";
-    case PROC_TYPE_AMD_GPU: return "AMD/ATI GPU";
+    case PROC_TYPE_AMD_GPU: return "AMD GPU";
     case PROC_TYPE_INTEL_GPU: return "Intel GPU";
     case PROC_TYPE_APPLE_GPU: return "Apple GPU";
     }

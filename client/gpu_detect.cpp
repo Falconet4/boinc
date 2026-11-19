@@ -201,6 +201,79 @@ static void reset_dpm_clock_cache() {
 #endif
 }
 
+// Build the per-device lists for NVIDIA, Intel and Apple from the vectors
+// above.  Called at the end of detect_gpus() so the lists exist before the
+// child process writes coproc_info.xml.
+//
+void COPROCS::set_vendor_devices() {
+    nvidia.devices.clear();
+    for (unsigned int i=0; i<nvidia_gpus.size(); i++) {
+        const COPROC_NVIDIA& d = nvidia_gpus[i];
+        GPU_DEVICE g;
+        safe_strcpy(g.vendor, "nvidia");
+        safe_strcpy(g.name, d.cuda_prop.name);
+        if (!g.name[0]) safe_strcpy(g.name, d.opencl_prop.name);
+        g.device_num = d.device_num;
+        g.compcap_major = d.cuda_prop.major;
+        g.compcap_minor = d.cuda_prop.minor;
+        g.cuda_version = d.cuda_version;
+        g.driver_version = d.display_driver_version;
+        g.opencl_version = d.opencl_prop.opencl_device_version_int;
+        g.have_fp64 = d.have_fp64;
+        g.peak_flops = d.peak_flops;
+        g.peak_flops_dp = d.peak_flops_dp;
+        g.total_ram = d.cuda_prop.totalGlobalMem;
+        if (!g.total_ram) g.total_ram = (double)d.opencl_prop.global_mem_size;
+        if (nvidia.devices.size() < MAX_COPROC_INSTANCES) {
+            nvidia.devices.push_back(g);
+        }
+    }
+    // correlate() rebuilds the aggregate from these entries in the
+    // in-process path, so give every instance the list.
+    //
+    for (unsigned int i=0; i<nvidia_gpus.size(); i++) {
+        nvidia_gpus[i].devices = nvidia.devices;
+    }
+
+    intel_gpu.devices.clear();
+    for (unsigned int i=0; i<intel_gpu_opencls.size(); i++) {
+        const OPENCL_DEVICE_PROP& o = intel_gpu_opencls[i];
+        GPU_DEVICE g;
+        safe_strcpy(g.vendor, "intel");
+        safe_strcpy(g.name, o.name);
+        g.device_num = o.device_num;
+        g.opencl_version = o.opencl_device_version_int;
+        g.driver_version = o.opencl_driver_revision;
+        g.have_fp64 = (o.have_fp64 || o.double_fp_config != 0);
+        g.peak_flops = o.peak_flops;
+        g.peak_flops_dp = o.peak_flops_dp;
+        g.total_ram = o.global_mem_size;
+        if (intel_gpu.devices.size() < MAX_COPROC_INSTANCES) {
+            intel_gpu.devices.push_back(g);
+        }
+    }
+
+#ifdef __APPLE__
+    if (!apple_gpu.devices.empty()) return;    // Metal is authoritative
+    apple_gpu.devices.clear();
+    for (unsigned int i=0; i<apple_gpu_opencls.size(); i++) {
+        const OPENCL_DEVICE_PROP& o = apple_gpu_opencls[i];
+        GPU_DEVICE g;
+        safe_strcpy(g.vendor, "apple");
+        safe_strcpy(g.name, o.name);
+        g.device_num = o.device_num;
+        g.opencl_version = o.opencl_device_version_int;
+        g.have_fp64 = (o.have_fp64 || o.double_fp_config != 0);
+        g.peak_flops = o.peak_flops;
+        g.peak_flops_dp = o.peak_flops_dp;
+        g.total_ram = o.global_mem_size;
+        if (apple_gpu.devices.size() < MAX_COPROC_INSTANCES) {
+            apple_gpu.devices.push_back(g);
+        }
+    }
+#endif
+}
+
 // populate the global vectors
 // ati_gpus, nvidia_gpus, intel_gpus, nvidia_opencls, etc.
 //
@@ -262,6 +335,11 @@ void COPROCS::detect_gpus(vector<string> &warnings) {
     for (unsigned int i=0; i<ati_gpus.size(); i++) {
         ati_gpus[i].devices = ati.devices;
     }
+
+    // The child-process path writes this object before correlate() runs,
+    // so build the NVIDIA/Intel/Apple per-device lists here as well.
+    //
+    set_vendor_devices();
 }
 
 // for each GPU type, scan the GPUs we detected
@@ -538,7 +616,12 @@ int COPROCS::write_coproc_info_file(vector<string> &warnings) {
         cc.devices = ati.devices;
         cc.write_xml(mf, false);
     }
+    // Per-device lists belong to the aggregate; attach them to each
+    // instance entry so they survive the child-process file round trip and
+    // whichever instance correlate() selects in the parent.
+    //
     for (i=0; i<nvidia_gpus.size(); ++i) {
+        nvidia_gpus[i].devices = nvidia.devices;
         temp = nvidia_gpus[i].count;
         nvidia_gpus[i].count = 1;
         nvidia_gpus[i].pci_infos[0] = nvidia_gpus[i].pci_info;
@@ -546,9 +629,11 @@ int COPROCS::write_coproc_info_file(vector<string> &warnings) {
         nvidia_gpus[i].count = temp;
     }
     for (i=0; i<intel_gpus.size(); ++i) {
+        intel_gpus[i].devices = intel_gpu.devices;
         intel_gpus[i].write_xml(mf, false);
     }
     for (i=0; i<apple_gpus.size(); ++i) {
+        apple_gpus[i].devices = apple_gpu.devices;
         apple_gpus[i].write_xml(mf, false);
     }
     for (i=0; i<ati_opencls.size(); ++i) {

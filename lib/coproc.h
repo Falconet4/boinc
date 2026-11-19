@@ -549,6 +549,7 @@ struct COPROCS {
         IGNORE_GPU_INSTANCE &ignore_gpu_instance
     );
     void detect_gpus(std::vector<std::string> &warnings);
+    void set_vendor_devices();
     int launch_child_process_to_detect_gpus();
     void correlate_gpus(
         bool use_all,
