@@ -132,6 +132,13 @@ void CLIENT_TIME_STATS::trim_stats_log() {
     }
     fclose(f);
     fclose(f2);
+
+    // Install the trimmed log.  Without this the next call rewrites the
+    // same temp file and TIME_STATS_LOG grows without bound.
+    //
+    if (boinc_rename(TEMP_TIME_STATS_FILE_NAME, TIME_STATS_LOG)) {
+        boinc_delete_file(TEMP_TIME_STATS_FILE_NAME);
+    }
 #endif
 }
 

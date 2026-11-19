@@ -401,7 +401,11 @@ int main(int argc, char** argv) {
             }
             hostname = p+1;
             *q = 0;
-            port = atoi(q+1);
+            // q points at ']'; the port, if present, follows "]:"
+            //
+            if (q[1] == ':') {
+                port = atoi(q+2);
+            }
         } else {
             hostname = hostname_buf;
             p = strchr(hostname, ':');

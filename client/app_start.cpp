@@ -982,11 +982,40 @@ int ACTIVE_TASK::start() {
             // Use mmap() shared memory
             snprintf(buf, sizeof(buf), "%s/%s", slot_dir, MMAPPED_FILE_NAME);
             if (g_use_sandbox) {
-                if (!boinc_file_exists(buf)) {
-                    int fd = open(buf, O_RDWR | O_CREAT, 0660);
+                // The slot directory is writable by the project's user, so
+                // never follow a symlink it may have left at this path.
+                // Create with O_EXCL and retry after removing a non-regular
+                // entry; this closes the unlink/lstat/open race window.
+                //
+                int fd = -1;
+                for (int tries=0; tries<3; tries++) {
+                    fd = open(buf, O_RDWR | O_CREAT | O_EXCL
+#ifdef O_NOFOLLOW
+                        | O_NOFOLLOW
+#endif
+                        , 0660);
                     if (fd >= 0) {
-                        close (fd);
-                        if (g_use_sandbox) set_to_project_group(buf);
+                        close(fd);
+                        set_to_project_group(buf);
+                        break;
+                    }
+                    if (errno != EEXIST && errno != ELOOP) {
+                        msg_printf(wup->project, MSG_INTERNAL_ERROR,
+                            "ACTIVE_TASK::start(): can't create memory-mapped file %s: %s",
+                            buf, strerror(errno)
+                        );
+                        break;
+                    }
+                    struct stat sbuf;
+                    if (lstat(buf, &sbuf) != 0) continue;
+                    if (S_ISREG(sbuf.st_mode)) break;   // use the existing file
+                    if (unlink(buf)) {
+                        msg_printf(wup->project, MSG_INTERNAL_ERROR,
+                            "ACTIVE_TASK::start(): can't remove non-regular shared-memory file %s: %s",
+                            buf, strerror(errno)
+                        );
+                        retval = ERR_UNLINK;
+                        goto error;
                     }
                 }
             }
