@@ -1073,6 +1073,20 @@ void COPROC_APPLE::get(vector<string>&) {
 void COPROC_APPLE::correlate(bool, vector<int> &ignore_devs) {
     if (!ignore_devs.empty() && ignore_devs[0]==0) return;
     if (apple_gpus.empty()) return;
+    devices.clear();
+    for (unsigned int i=0; i<apple_gpus.size(); i++) {
+        COPROC_APPLE& a = apple_gpus[i];
+        a.device_num = i;
+        GPU_DEVICE g;
+        safe_strcpy(g.vendor, "apple");
+        safe_strcpy(g.name, a.model);
+        g.device_num = i;
+        g.metal_support = a.metal_support;
+        g.ncores = a.ncores;
+        g.peak_flops = a.peak_flops;
+        g.total_ram = a.available_ram;
+        if (devices.size() < MAX_COPROC_INSTANCES) devices.push_back(g);
+    }
     *this = apple_gpus[0];
 }
 #endif

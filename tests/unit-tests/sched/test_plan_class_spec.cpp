@@ -76,6 +76,139 @@ TEST(test_plan_class_spec, amd_arch_and_hip) {
     EXPECT_FALSE(amd_device_matches(spec2, mi, ram, NULL));
 }
 
+static GPU_DEVICE make_gpu_device(
+    const char* name, int device_num, int cc_major, int cc_minor,
+    int cuda, bool fp64, double fp32, double fp64_peak, double ram,
+    int metal = 0
+) {
+    GPU_DEVICE d;
+    snprintf(d.name, sizeof(d.name), "%s", name);
+    d.device_num = device_num;
+    d.compcap_major = cc_major;
+    d.compcap_minor = cc_minor;
+    d.cuda_version = cuda;
+    d.have_fp64 = fp64;
+    d.peak_flops = fp32;
+    d.peak_flops_dp = fp64_peak;
+    d.total_ram = ram;
+    d.metal_support = metal;
+    return d;
+}
+
+TEST(test_plan_class_spec, nvidia_device_match) {
+    GPU_DEVICE_REQUIREMENTS req;
+    req.min_compcap = 700;
+    GPU_DEVICE p100 = make_gpu_device(
+        "Tesla P100", 0, 6, 0, 8000, true, 9.3e12, 4.65e12, 16e9
+    );
+    GPU_DEVICE v100 = make_gpu_device(
+        "Tesla V100", 1, 7, 0, 9000, true, 15.7e12, 7.8e12, 32e9
+    );
+    double ram = 0;
+    EXPECT_FALSE(gpu_device_matches(req, p100, ram, NULL));
+    EXPECT_TRUE(gpu_device_matches(req, v100, ram, NULL));
+    EXPECT_DOUBLE_EQ(ram, v100.total_ram);
+
+    req.min_compcap = 0;
+    req.max_compcap = 600;
+    EXPECT_TRUE(gpu_device_matches(req, p100, ram, NULL));
+    EXPECT_FALSE(gpu_device_matches(req, v100, ram, NULL));
+
+    GPU_DEVICE_REQUIREMENTS req2;
+    req2.min_cuda_version = 9000;
+    EXPECT_FALSE(gpu_device_matches(req2, p100, ram, NULL));
+    EXPECT_TRUE(gpu_device_matches(req2, v100, ram, NULL));
+
+    GPU_DEVICE_REQUIREMENTS req3;
+    req3.require_fp64 = true;
+    GPU_DEVICE consumer = make_gpu_device(
+        "RTX 4090", 2, 8, 9, 12000, true, 82.6e12, 1.29e12, 24e9
+    );
+    EXPECT_TRUE(gpu_device_matches(req3, consumer, ram, NULL));
+    consumer.have_fp64 = false;
+    EXPECT_FALSE(gpu_device_matches(req3, consumer, ram, NULL));
+}
+
+TEST(test_plan_class_spec, apple_metal_match) {
+    GPU_DEVICE_REQUIREMENTS req;
+    req.min_metal_support = 3;
+    GPU_DEVICE m1 = make_gpu_device("Apple M1", 0, 0, 0, 0, false, 2.6e12, 0, 8e9, 3);
+    GPU_DEVICE m2 = make_gpu_device("Apple M2", 1, 0, 0, 0, false, 3.6e12, 0, 16e9, 4);
+    double ram = 0;
+    EXPECT_TRUE(gpu_device_matches(req, m1, ram, NULL));
+    EXPECT_TRUE(gpu_device_matches(req, m2, ram, NULL));
+    req.min_metal_support = 4;
+    EXPECT_FALSE(gpu_device_matches(req, m1, ram, NULL));
+    EXPECT_TRUE(gpu_device_matches(req, m2, ram, NULL));
+}
+
+// Two heterogeneous NVIDIA GPUs are both in the pool; a plan class that
+// requires a newer compute capability selects only the newer one.
+//
+TEST(test_plan_class_spec, nvidia_heterogeneous_set) {
+    std::vector<GPU_DEVICE> devices;
+    devices.push_back(make_gpu_device(
+        "GTX 1080", 0, 6, 1, 9000, true, 8.9e12, 0.28e12, 8e9
+    ));
+    devices.push_back(make_gpu_device(
+        "RTX 4090", 1, 8, 9, 12000, true, 82.6e12, 1.29e12, 24e9
+    ));
+    COPROC cp;
+    cp.count = 2;
+    cp.device_nums[0] = 0;
+    cp.device_nums[1] = 1;
+
+    GPU_DEVICE_REQUIREMENTS req;
+    req.min_compcap = 800;
+    int nums[MAX_COPROC_INSTANCES];
+    int best = -1;
+    double min_ram = 0;
+    int n = gpu_matching_devices(
+        req, devices, cp, nums, MAX_COPROC_INSTANCES, best, min_ram
+    );
+    ASSERT_EQ(n, 1);
+    EXPECT_EQ(nums[0], 1);
+    EXPECT_EQ(best, 1);
+
+    GPU_DEVICE_REQUIREMENTS none;
+    n = gpu_matching_devices(
+        none, devices, cp, nums, MAX_COPROC_INSTANCES, best, min_ram
+    );
+    EXPECT_EQ(n, 2);
+    EXPECT_DOUBLE_EQ(min_ram, 8e9);
+}
+
+TEST(test_plan_class_spec, vendor_matching_set) {
+    GPU_DEVICE_REQUIREMENTS req;
+    req.min_compcap = 800;
+    std::vector<GPU_DEVICE> devices;
+    devices.push_back(make_gpu_device(
+        "A100", 0, 8, 0, 11000, true, 19.5e12, 9.7e12, 40e9
+    ));
+    devices.push_back(make_gpu_device(
+        "RTX 3080", 1, 8, 6, 11000, true, 29.8e12, 0.93e12, 10e9
+    ));
+    devices.push_back(make_gpu_device(
+        "GTX 1080", 2, 6, 1, 9000, true, 8.9e12, 0.28e12, 8e9
+    ));
+    COPROC cp;
+    cp.count = 3;
+    cp.device_nums[0] = 0;
+    cp.device_nums[1] = 1;
+    cp.device_nums[2] = 2;
+    int nums[MAX_COPROC_INSTANCES];
+    int best = -1;
+    double min_ram = 0;
+    int n = gpu_matching_devices(
+        req, devices, cp, nums, MAX_COPROC_INSTANCES, best, min_ram
+    );
+    ASSERT_EQ(n, 2);
+    EXPECT_EQ(nums[0], 0);
+    EXPECT_EQ(nums[1], 1);
+    EXPECT_EQ(best, 1);                 // RTX 3080 has the higher FP32
+    EXPECT_DOUBLE_EQ(min_ram, 10e9);    // smallest match
+}
+
 TEST(test_plan_class_spec, amd_matching_set) {
     AMD_DEVICE_REQUIREMENTS req;
     req.require_fp64 = true;

@@ -99,6 +99,15 @@ void host_info_json(string &out) {
         out += "\n    ]";
     }
 
+    string devs;
+    g_request->coprocs.devices_string_json(devs);
+    if (!devs.empty()) {
+        out += ",\n"\
+"    \"devices\": [\n";
+        out += devs;
+        out += "\n    ]";
+    }
+
     DOCKER_INFO di;
     di.get_docker_info();
 

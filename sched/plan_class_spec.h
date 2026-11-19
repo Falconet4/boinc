@@ -270,6 +270,114 @@ inline bool amd_device_matches(
     return true;
 }
 
+// Per-device requirements for NVIDIA, Intel and Apple GPUs.
+//
+struct GPU_DEVICE_REQUIREMENTS {
+    int min_compcap = 0;
+    int max_compcap = 0;
+    int min_cuda_version = 0;
+    int max_cuda_version = 0;
+    int min_metal_support = 0;
+    bool require_fp64 = false;
+    double min_gpu_dp_flops = 0;
+    double min_gpu_ram_mb = 0;
+    double min_gpu_peak_flops = 0;
+    double max_gpu_peak_flops = 0;
+};
+
+inline bool gpu_device_matches(
+    const GPU_DEVICE_REQUIREMENTS& req, const GPU_DEVICE& dev,
+    double& gpu_ram, const char** why
+) {
+    if (why) *why = NULL;
+    if (req.min_compcap) {
+        int cc = dev.compcap_major*100 + dev.compcap_minor;
+        if (cc < req.min_compcap) {
+            if (why) *why = "compute capability too low";
+            return false;
+        }
+    }
+    if (req.max_compcap) {
+        int cc = dev.compcap_major*100 + dev.compcap_minor;
+        if (cc > req.max_compcap) {
+            if (why) *why = "compute capability too high";
+            return false;
+        }
+    }
+    if (req.min_cuda_version
+        && (!dev.cuda_version || dev.cuda_version < req.min_cuda_version)
+    ) {
+        if (why) *why = "CUDA version too low";
+        return false;
+    }
+    if (req.max_cuda_version
+        && dev.cuda_version && dev.cuda_version > req.max_cuda_version
+    ) {
+        if (why) *why = "CUDA version too high";
+        return false;
+    }
+    if (req.min_metal_support
+        && dev.metal_support < req.min_metal_support
+    ) {
+        if (why) *why = "Metal support too low";
+        return false;
+    }
+    if (req.require_fp64 && !dev.have_fp64) {
+        if (why) *why = "FP64 not supported";
+        return false;
+    }
+    if (req.min_gpu_dp_flops > 0
+        && (!dev.have_fp64 || dev.peak_flops_dp < req.min_gpu_dp_flops)
+    ) {
+        if (why) *why = "FP64 peak too low";
+        return false;
+    }
+    if (req.min_gpu_ram_mb
+        && dev.total_ram < req.min_gpu_ram_mb * 1024. * 1024.
+    ) {
+        if (why) *why = "GPU RAM too small";
+        return false;
+    }
+    if (req.min_gpu_peak_flops
+        && dev.peak_flops < req.min_gpu_peak_flops
+    ) {
+        if (why) *why = "FP32 peak too low";
+        return false;
+    }
+    if (req.max_gpu_peak_flops
+        && dev.peak_flops > req.max_gpu_peak_flops
+    ) {
+        if (why) *why = "FP32 peak too high";
+        return false;
+    }
+    gpu_ram = dev.total_ram;
+    return true;
+}
+
+inline int gpu_matching_devices(
+    const GPU_DEVICE_REQUIREMENTS& req,
+    const std::vector<GPU_DEVICE>& devices, const COPROC& cp,
+    int* nums, int max, int& best, double& min_ram
+) {
+    best = -1;
+    min_ram = 0;
+    int n = 0;
+    for (unsigned int i=0; i<devices.size(); i++) {
+        const GPU_DEVICE& d = devices[i];
+        if (!device_num_allowed(cp.device_nums, cp.count, d.device_num)) {
+            continue;
+        }
+        double ram = 0;
+        if (!gpu_device_matches(req, d, ram, NULL)) continue;
+        if (n < max) nums[n++] = d.device_num;
+        if (best < 0 || d.peak_flops > devices[best].peak_flops) {
+            best = (int)i;
+        }
+        if (!min_ram || ram < min_ram) min_ram = ram;
+    }
+    return n;
+}
+
 // Select the devices in cp that satisfy req.  Returns the number stored
 // (capped at max), the index of the fastest match in best, and the minimum
 // total RAM among matches.  Empty cp.devices returns 0.

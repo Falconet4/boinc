@@ -866,11 +866,70 @@ void COPROCS::correlate_opencl(
     }
 
     if (intel_gpu_opencls.size() > 0) {
-        intel_gpu.find_best_opencls(
-            use_all, intel_gpu_opencls,
-            ignore_gpu_instance[PROC_TYPE_INTEL_GPU]
-        );
-        intel_gpu.available_ram = intel_gpu.opencl_prop.global_mem_size;
+        (void)use_all;      // report every usable Intel device
+        intel_gpu.devices.clear();
+        intel_gpu.count = 0;
+        intel_gpu.opencl_device_count = 0;
+        intel_gpu.have_opencl = false;
+        double intel_min_ram = 0, intel_max_peak = 0;
+        bool first_intel = true;
+        for (unsigned int i=0; i<intel_gpu_opencls.size(); i++) {
+            OPENCL_DEVICE_PROP& o = intel_gpu_opencls[i];
+            if (in_vector(o.device_num, ignore_gpu_instance[PROC_TYPE_INTEL_GPU])) {
+                o.is_used = COPROC_IGNORED;
+                continue;
+            }
+            if (intel_gpu.count >= MAX_COPROC_INSTANCES) {
+                o.is_used = COPROC_UNUSED;
+                continue;
+            }
+            int k = intel_gpu.count++;
+            intel_gpu.device_nums[k] = o.device_num;
+            intel_gpu.instance_has_opencl[k] = true;
+            intel_gpu.opencl_device_indexes[k] = o.opencl_device_index;
+            intel_gpu.opencl_device_ids[k] = o.device_id;
+            o.is_used = COPROC_USED;
+            intel_gpu.have_opencl = true;
+            if (first_intel) {
+                intel_gpu.opencl_prop = o;
+                intel_min_ram = o.global_mem_size;
+                intel_max_peak = o.peak_flops;
+                first_intel = false;
+            } else {
+                if (o.global_mem_size < intel_min_ram) {
+                    intel_min_ram = o.global_mem_size;
+                }
+                if (o.peak_flops > intel_max_peak) {
+                    intel_max_peak = o.peak_flops;
+                }
+            }
+        }
+        if (intel_gpu.count) {
+            intel_gpu.opencl_device_count = intel_gpu.count;
+            intel_gpu.opencl_prop.global_mem_size = intel_min_ram;
+            intel_gpu.available_ram = intel_min_ram;
+            intel_gpu.peak_flops = intel_max_peak;
+        }
+        intel_gpu.devices.clear();
+        for (unsigned int i=0; i<intel_gpu_opencls.size(); i++) {
+            OPENCL_DEVICE_PROP& o = intel_gpu_opencls[i];
+            if (in_vector(o.device_num, ignore_gpu_instance[PROC_TYPE_INTEL_GPU])) {
+                continue;
+            }
+            GPU_DEVICE g;
+            safe_strcpy(g.vendor, "intel");
+            safe_strcpy(g.name, o.name);
+            g.device_num = o.device_num;
+            g.opencl_version = o.opencl_device_version_int;
+            g.driver_version = o.opencl_driver_revision;
+            g.have_fp64 = (o.have_fp64 || o.double_fp_config != 0);
+            g.peak_flops = o.peak_flops;
+            g.peak_flops_dp = o.peak_flops_dp;
+            g.total_ram = o.global_mem_size;
+            if (intel_gpu.devices.size() < MAX_COPROC_INSTANCES) {
+                intel_gpu.devices.push_back(g);
+            }
+        }
     }
 #ifdef __APPLE__
     if (apple_gpu_opencls.size() > 0) {
@@ -879,15 +938,71 @@ void COPROCS::correlate_opencl(
                 apple_gpu_opencls, ignore_gpu_instance[PROC_TYPE_APPLE_GPU]
             );
         } else {
-            apple_gpu.find_best_opencls(
-                use_all, apple_gpu_opencls,
-                ignore_gpu_instance[PROC_TYPE_APPLE_GPU]
-            );
-            safe_strcpy(apple_gpu.model, apple_gpu.opencl_prop.name);
+            (void)use_all;      // report every usable Apple device
+            apple_gpu.count = 0;
+            apple_gpu.opencl_device_count = 0;
+            double apple_min_ram = 0, apple_max_peak = 0;
+            bool first_apple = true;
+            for (unsigned int i=0; i<apple_gpu_opencls.size(); i++) {
+                OPENCL_DEVICE_PROP& o = apple_gpu_opencls[i];
+                if (in_vector(o.device_num, ignore_gpu_instance[PROC_TYPE_APPLE_GPU])) {
+                    o.is_used = COPROC_IGNORED;
+                    continue;
+                }
+                if (apple_gpu.count >= MAX_COPROC_INSTANCES) {
+                    o.is_used = COPROC_UNUSED;
+                    continue;
+                }
+                int k = apple_gpu.count++;
+                apple_gpu.device_nums[k] = o.device_num;
+                apple_gpu.instance_has_opencl[k] = true;
+                apple_gpu.opencl_device_indexes[k] = o.opencl_device_index;
+                apple_gpu.opencl_device_ids[k] = o.device_id;
+                o.is_used = COPROC_USED;
+                apple_gpu.have_opencl = true;
+                if (first_apple) {
+                    apple_gpu.opencl_prop = o;
+                    safe_strcpy(apple_gpu.model, o.name);
+                    apple_min_ram = o.global_mem_size;
+                    apple_max_peak = o.peak_flops;
+                    first_apple = false;
+                } else {
+                    if (o.global_mem_size < apple_min_ram) {
+                        apple_min_ram = o.global_mem_size;
+                    }
+                    if (o.peak_flops > apple_max_peak) {
+                        apple_max_peak = o.peak_flops;
+                    }
+                }
+            }
+            if (apple_gpu.count) {
+                apple_gpu.opencl_device_count = apple_gpu.count;
+                apple_gpu.opencl_prop.global_mem_size = apple_min_ram;
+                apple_gpu.available_ram = apple_min_ram;
+            }
         }
         apple_gpu.set_peak_flops();
         if (!apple_gpu.available_ram) {
             apple_gpu.available_ram = apple_gpu.opencl_prop.global_mem_size;
+        }
+        apple_gpu.devices.clear();
+        for (unsigned int i=0; i<apple_gpu_opencls.size(); i++) {
+            OPENCL_DEVICE_PROP& o = apple_gpu_opencls[i];
+            if (in_vector(o.device_num, ignore_gpu_instance[PROC_TYPE_APPLE_GPU])) {
+                continue;
+            }
+            GPU_DEVICE g;
+            safe_strcpy(g.vendor, "apple");
+            safe_strcpy(g.name, o.name);
+            g.device_num = o.device_num;
+            g.opencl_version = o.opencl_device_version_int;
+            g.have_fp64 = (o.have_fp64 || o.double_fp_config != 0);
+            g.peak_flops = o.peak_flops;
+            g.peak_flops_dp = o.peak_flops_dp;
+            g.total_ram = o.global_mem_size;
+            if (apple_gpu.devices.size() < MAX_COPROC_INSTANCES) {
+                apple_gpu.devices.push_back(g);
+            }
         }
     }
 #endif

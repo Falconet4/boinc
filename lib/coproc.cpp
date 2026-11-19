@@ -306,6 +306,84 @@ void summary_json(
     }
 }
 
+void device_json(char* buf, size_t len, const GPU_DEVICE& d) {
+    char ename[4096];
+    json_escape_string(d.name, ename, sizeof(ename));
+    snprintf(buf, len,
+"            {\n"\
+"                \"name\": \"%s\",\n"\
+"                \"type\": \"%s\",\n"\
+"                \"device_num\": %d,\n"\
+"                \"compcap\": \"%d.%d\",\n"\
+"                \"cuda_version\": %d,\n"\
+"                \"driver_version\": %d,\n"\
+"                \"opencl_version\": %d,\n"\
+"                \"metal_support\": %d,\n"\
+"                \"ncores\": %d,\n"\
+"                \"fp64\": %s,\n"\
+"                \"peak_flops\": %.0f,\n"\
+"                \"peak_flops_dp\": %.0f,\n"\
+"                \"ram_mb\": %d\n"\
+"            }",
+        ename, d.vendor, d.device_num, d.compcap_major, d.compcap_minor,
+        d.cuda_version, d.driver_version, d.opencl_version,
+        d.metal_support, d.ncores, d.have_fp64?"true":"false",
+        d.peak_flops, d.peak_flops_dp,
+        (int)(d.total_ram/MEGA)
+    );
+}
+
+// Append the per-device list of a vendor as JSON array elements.
+//
+static void append_devices(
+    string& out, const std::vector<GPU_DEVICE>& devices
+) {
+    char buf[8192];
+    for (unsigned int i=0; i<devices.size(); i++) {
+        if (!out.empty()) out += ",\n";
+        device_json(buf, sizeof(buf), devices[i]);
+        out += buf;
+    }
+}
+
+static void ati_device_json(char* buf, size_t len, const COPROC_ATI_DEVICE& d) {
+    char ename[4096], earch[4096];
+    json_escape_string(d.name, ename, sizeof(ename));
+    json_escape_string(d.gcn_arch, earch, sizeof(earch));
+    snprintf(buf, len,
+"            {\n"\
+"                \"name\": \"%s\",\n"\
+"                \"type\": \"amd\",\n"\
+"                \"device_num\": %d,\n"\
+"                \"gcn_arch\": \"%s\",\n"\
+"                \"hip\": %s,\n"\
+"                \"hip_version\": %d,\n"\
+"                \"fp64\": %s,\n"\
+"                \"peak_flops\": %.0f,\n"\
+"                \"peak_flops_dp\": %.0f,\n"\
+"                \"ram_mb\": %d\n"\
+"            }",
+        ename, d.device_num, earch,
+        d.have_hip?"true":"false", d.hip_version,
+        d.have_fp64?"true":"false",
+        d.peak_flops, d.peak_flops_dp,
+        (int)(d.total_ram/MEGA)
+    );
+}
+
+void COPROCS::devices_string_json(string& out) {
+    out = "";
+    char buf[8192];
+    for (unsigned int i=0; i<ati.devices.size(); i++) {
+        if (!out.empty()) out += ",\n";
+        ati_device_json(buf, sizeof(buf), ati.devices[i]);
+        out += buf;
+    }
+    append_devices(out, nvidia.devices);
+    append_devices(out, intel_gpu.devices);
+    append_devices(out, apple_gpu.devices);
+}
+
 void COPROCS::summary_string_json(string &out) {
     // Large enough for the worst case: four fields of 256 bytes each,
     // every byte escaped as \u00XX, plus the surrounding JSON.
@@ -600,6 +678,27 @@ void COPROC_NVIDIA::write_xml(MIOFILE& f, bool scheduler_rpc) {
         opencl_prop.write_xml(f, "coproc_opencl");
     }
 
+    for (unsigned int i=0; i<devices.size(); i++) {
+        const GPU_DEVICE& d = devices[i];
+        f.printf(
+            "   <device>\n"
+            "      <name>%s</name>\n"
+            "      <device_num>%d</device_num>\n"
+            "      <compcap_major>%d</compcap_major>\n"
+            "      <compcap_minor>%d</compcap_minor>\n"
+            "      <cuda_version>%d</cuda_version>\n"
+            "      <driver_version>%d</driver_version>\n"
+            "      <have_fp64>%d</have_fp64>\n"
+            "      <peak_flops>%f</peak_flops>\n"
+            "      <peak_flops_dp>%f</peak_flops_dp>\n"
+            "      <total_ram>%f</total_ram>\n"
+            "   </device>\n",
+            d.name, d.device_num, d.compcap_major, d.compcap_minor,
+            d.cuda_version, d.driver_version, d.have_fp64 ? 1 : 0,
+            d.peak_flops, d.peak_flops_dp, d.total_ram
+        );
+    }
+
     if (!scheduler_rpc) {
         for (int i=0; i<count; i++) {
             pci_infos[i].write(f);
@@ -637,6 +736,7 @@ void COPROC_NVIDIA::clear() {
     cuda_prop.textureAlignment = 0;
     cuda_prop.deviceOverlap = 0;
     cuda_prop.multiProcessorCount = 0;
+    devices.clear();
     is_used = COPROC_USED;
 }
 
@@ -656,6 +756,26 @@ int COPROC_NVIDIA::parse(XML_PARSER& xp) {
             }
             check_count("NVIDIA");
             return 0;
+        }
+        if (xp.match_tag("device")) {
+            GPU_DEVICE d;
+            while (!xp.get_tag()) {
+                if (xp.match_tag("/device")) break;
+                if (xp.parse_str("name", d.name, sizeof(d.name))) continue;
+                if (xp.parse_int("device_num", d.device_num)) continue;
+                if (xp.parse_int("compcap_major", d.compcap_major)) continue;
+                if (xp.parse_int("compcap_minor", d.compcap_minor)) continue;
+                if (xp.parse_int("cuda_version", d.cuda_version)) continue;
+                if (xp.parse_int("driver_version", d.driver_version)) continue;
+                if (xp.parse_bool("have_fp64", d.have_fp64)) continue;
+                if (xp.parse_double("peak_flops", d.peak_flops)) continue;
+                if (xp.parse_double("peak_flops_dp", d.peak_flops_dp)) continue;
+                if (xp.parse_double("total_ram", d.total_ram)) continue;
+            }
+            if (devices.size() < MAX_COPROC_INSTANCES) {
+                devices.push_back(d);
+            }
+            continue;
         }
         if (xp.parse_int("count", count)) continue;
         if (xp.parse_double("peak_flops", peak_flops)) continue;
@@ -1508,6 +1628,24 @@ void COPROC_INTEL::write_xml(MIOFILE& f, bool scheduler_rpc) {
         opencl_prop.write_xml(f, "coproc_opencl");
     }
 
+    for (unsigned int i=0; i<devices.size(); i++) {
+        const GPU_DEVICE& d = devices[i];
+        f.printf(
+            "   <device>\n"
+            "      <name>%s</name>\n"
+            "      <device_num>%d</device_num>\n"
+            "      <driver_version>%d</driver_version>\n"
+            "      <opencl_version>%d</opencl_version>\n"
+            "      <have_fp64>%d</have_fp64>\n"
+            "      <peak_flops>%f</peak_flops>\n"
+            "      <peak_flops_dp>%f</peak_flops_dp>\n"
+            "      <total_ram>%f</total_ram>\n"
+            "   </device>\n",
+            d.name, d.device_num, d.driver_version, d.opencl_version,
+            d.have_fp64 ? 1 : 0, d.peak_flops, d.peak_flops_dp, d.total_ram
+        );
+    }
+
     f.printf("</coproc_intel_gpu>\n");
 }
 #endif
@@ -1517,6 +1655,7 @@ void COPROC_INTEL::clear() {
     *this = x;
     safe_strcpy(type, proc_type_name_xml(PROC_TYPE_INTEL_GPU));
     estimated_delay = -1;
+    devices.clear();
     is_used = COPROC_USED;
 }
 
@@ -1535,6 +1674,22 @@ int COPROC_INTEL::parse(XML_PARSER& xp) {
             }
             check_count("Intel");
             return 0;
+        }
+        if (xp.match_tag("device")) {
+            GPU_DEVICE d;
+            while (!xp.get_tag()) {
+                if (xp.match_tag("/device")) break;
+                if (xp.parse_str("name", d.name, sizeof(d.name))) continue;
+                if (xp.parse_int("device_num", d.device_num)) continue;
+                if (xp.parse_int("driver_version", d.driver_version)) continue;
+                if (xp.parse_int("opencl_version", d.opencl_version)) continue;
+                if (xp.parse_bool("have_fp64", d.have_fp64)) continue;
+                if (xp.parse_double("peak_flops", d.peak_flops)) continue;
+                if (xp.parse_double("peak_flops_dp", d.peak_flops_dp)) continue;
+                if (xp.parse_double("total_ram", d.total_ram)) continue;
+            }
+            if (devices.size() < MAX_COPROC_INSTANCES) devices.push_back(d);
+            continue;
         }
         if (xp.parse_int("count", count)) continue;
         if (xp.parse_double("peak_flops", peak_flops)) continue;
@@ -1622,6 +1777,22 @@ void COPROC_APPLE::write_xml(MIOFILE& f, bool scheduler_rpc) {
         opencl_prop.write_xml(f, "coproc_opencl");
     }
 
+    for (unsigned int i=0; i<devices.size(); i++) {
+        const GPU_DEVICE& d = devices[i];
+        f.printf(
+            "   <device>\n"
+            "      <name>%s</name>\n"
+            "      <device_num>%d</device_num>\n"
+            "      <metal_support>%d</metal_support>\n"
+            "      <ncores>%d</ncores>\n"
+            "      <peak_flops>%f</peak_flops>\n"
+            "      <total_ram>%f</total_ram>\n"
+            "   </device>\n",
+            d.name, d.device_num, d.metal_support, d.ncores,
+            d.peak_flops, d.total_ram
+        );
+    }
+
     f.printf("</coproc_apple_gpu>\n");
 }
 #endif
@@ -1631,6 +1802,7 @@ void COPROC_APPLE::clear() {
     *this = x;
     safe_strcpy(type, proc_type_name_xml(PROC_TYPE_APPLE_GPU));
     estimated_delay = -1;
+    devices.clear();
     is_used = COPROC_USED;
 }
 
@@ -1648,6 +1820,20 @@ int COPROC_APPLE::parse(XML_PARSER& xp) {
             }
             check_count("Apple");
             return 0;
+        }
+        if (xp.match_tag("device")) {
+            GPU_DEVICE d;
+            while (!xp.get_tag()) {
+                if (xp.match_tag("/device")) break;
+                if (xp.parse_str("name", d.name, sizeof(d.name))) continue;
+                if (xp.parse_int("device_num", d.device_num)) continue;
+                if (xp.parse_int("metal_support", d.metal_support)) continue;
+                if (xp.parse_int("ncores", d.ncores)) continue;
+                if (xp.parse_double("peak_flops", d.peak_flops)) continue;
+                if (xp.parse_double("total_ram", d.total_ram)) continue;
+            }
+            if (devices.size() < MAX_COPROC_INSTANCES) devices.push_back(d);
+            continue;
         }
         if (xp.parse_int("count", count)) continue;
         if (xp.parse_str("model", model, sizeof(model))) continue;

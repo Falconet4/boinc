@@ -369,6 +369,13 @@ function amd_gcn_family($arch) {
 // return a human-readable version of the GPU info
 //
 function gpu_desc($misc) {
+    if (!empty($misc->devices)) {
+        $gpus = [];
+        foreach ($misc->devices as $d) {
+            $gpus[] = device_desc($d);
+        }
+        return implode('<br>', $gpus);
+    }
     if (empty($misc->gpus)) return '---';
     $gpus = [];
     foreach ($misc->gpus as $g) {
@@ -405,6 +412,57 @@ function gpu_desc($misc) {
         $gpus[] = $x;
     }
     return implode('<br>', $gpus);
+}
+
+// Render one per-device entry (see COPROCS::devices_string_json()).
+//
+function device_desc($d) {
+    $x = sprintf('%d. %s', intval($d->device_num) + 1,
+        htmlspecialchars($d->name)
+    );
+    if (!empty($d->ram_mb)) {
+        $x .= sprintf('; %s RAM', size_string($d->ram_mb*MEGA));
+    }
+    if ($d->type == 'amd') {
+        if (!empty($d->hip)) {
+            $x .= '; HIP';
+            if (!empty($d->hip_version)) {
+                $x .= ' ' . hip_version_string($d->hip_version);
+            }
+        }
+        if (!empty($d->gcn_arch)) {
+            $arch = htmlspecialchars($d->gcn_arch);
+            $family = amd_gcn_family($d->gcn_arch);
+            $x .= $family ? " ($family, $arch)" : " ($arch)";
+        }
+    } else {
+        if (!empty($d->compcap) && $d->compcap != '0.0') {
+            $x .= sprintf('; CC %s', htmlspecialchars($d->compcap));
+        }
+        if (!empty($d->driver_version)) {
+            $x .= sprintf('; Driver: %d', intval($d->driver_version));
+        }
+        if (!empty($d->opencl_version)) {
+            $x .= sprintf('; OpenCL: %d.%d',
+                intval($d->opencl_version)/100,
+                intval($d->opencl_version)%100
+            );
+        }
+        if (!empty($d->metal_support)) {
+            $x .= sprintf('; Metal %d', intval($d->metal_support));
+        }
+        if (!empty($d->ncores)) {
+            $x .= sprintf('; %d cores', intval($d->ncores));
+        }
+    }
+    if (!empty($d->fp64)) {
+        if (!empty($d->peak_flops_dp)) {
+            $x .= sprintf('; FP64: %s', number_format($d->peak_flops_dp/1e9, 2).' GFLOPS');
+        } else {
+            $x .= '; FP64';
+        }
+    }
+    return $x;
 }
 
 // Given the same string as above, return the BOINC version
