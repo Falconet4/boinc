@@ -147,15 +147,15 @@ static void* load_hip_library() {
 #ifdef __linux__
 // Read a "key value" pair from a KFD topology properties file.
 //
-static bool read_kfd_prop(const char* path, const char* key, long& value) {
+static bool read_kfd_prop(const char* path, const char* key, long long& value) {
     FILE* f = fopen(path, "r");
     if (!f) return false;
     char buf[256];
     bool found = false;
     while (fgets(buf, sizeof(buf), f)) {
         char k[128];
-        long v;
-        if (sscanf(buf, "%127s %ld", k, &v) == 2 && !strcmp(k, key)) {
+        long long v;
+        if (sscanf(buf, "%127s %lld", k, &v) == 2 && !strcmp(k, key)) {
             value = v;
             found = true;
             break;
@@ -170,7 +170,8 @@ static bool read_kfd_prop(const char* path, const char* key, long& value) {
 //
 static bool kfd_lookup(
     int pci_bus, int& gfx_target, int& simd_count, int& wave_front_size,
-    int& clock_mhz, double& vram, char* node_name, int node_name_len
+    int& clock_mhz, double& vram, int& pci_device_id, char* node_name,
+    int node_name_len
 ) {
     const char* base = "/sys/class/kfd/kfd/topology/nodes";
     DIR* d = opendir(base);
@@ -185,30 +186,34 @@ static bool kfd_lookup(
         snprintf(props, sizeof(props), "%s/%s/properties", base, e->d_name);
         snprintf(namepath, sizeof(namepath), "%s/%s/name", base, e->d_name);
 
-        long vendor_id = 0, location_id = 0;
+        long long vendor_id = 0, location_id = 0;
         if (!read_kfd_prop(props, "vendor_id", vendor_id)) continue;
         if (vendor_id != 4098) continue;    // 0x1002 = AMD
-        read_kfd_prop(props, "location_id", location_id);
+        // A node without location_id cannot be matched to a bus; treating
+        // the failed read as 0 would match the first APU node.
+        //
+        if (!read_kfd_prop(props, "location_id", location_id)) continue;
 
         // location_id encodes domain<<32 | bus<<8 | device<<3 | function
         //
         if (((location_id >> 8) & 0xff) != pci_bus) continue;
 
-        long v = 0;
+        long long v = 0;
         if (read_kfd_prop(props, "gfx_target_version", v)) gfx_target = (int)v;
         if (read_kfd_prop(props, "simd_count", v)) simd_count = (int)v;
         if (read_kfd_prop(props, "wave_front_size", v)) wave_front_size = (int)v;
         if (read_kfd_prop(props, "max_engine_clk_fcompute", v)) clock_mhz = (int)v;
+        if (read_kfd_prop(props, "device_id", v)) pci_device_id = (int)v;
 
         // The largest memory bank is VRAM
         //
         double best = 0;
-        for (int b = 0; b < 8; b++) {
+        for (int b = 0; b < 16; b++) {
             char mb[512];
             snprintf(mb, sizeof(mb),
                 "%s/%s/mem_banks/%d/properties", base, e->d_name, b
             );
-            long size = 0;
+            long long size = 0;
             if (read_kfd_prop(mb, "size_in_bytes", size)) {
                 if ((double)size > best) best = (double)size;
             }
@@ -230,30 +235,20 @@ static bool kfd_lookup(
 }
 #endif
 
-// Convert a KFD gfx target version (e.g. 120000) to an architecture
-// name (e.g. "gfx1200").
-//
-static void gfx_target_to_string(int target, char* buf, int len) {
-    if (target <= 0) {
-        safe_strcpy(buf, "");
-        return;
-    }
-    // KFD encodes gfx90a as 90010 (minor 0, stepping 10), which would
-    // otherwise be rendered as "gfx9010".
-    //
-    if (target == 90010) {
-        safe_strcpy(buf, "gfx90a");
-        return;
-    }
-    int major = target / 10000;
-    int minor = (target / 100) % 100;
-    int stepping = target % 100;
-    snprintf(buf, len, "gfx%d%d%d", major, minor, stepping);
-}
-
 int ati_compare(COPROC_ATI& c1, COPROC_ATI& c2, bool loose) {
-    if (c1.attribs.doublePrecision && !c2.attribs.doublePrecision) return 1;
-    if (!c1.attribs.doublePrecision && c2.attribs.doublePrecision) return -1;
+    // Strict comparison picks the most capable card: peak FP32 first, so
+    // an FP64 guess for an unknown architecture cannot outrank a much
+    // faster device.  Loose comparison groups equivalent instances.
+    //
+    if (!loose) {
+        if (c1.peak_flops > c2.peak_flops) return 1;
+        if (c1.peak_flops < c2.peak_flops) return -1;
+    }
+    // Prefer a device that actually reports FP64.  attribs.doublePrecision
+    // is only populated by the CAL path, so use the common FP64 fields.
+    //
+    if (c1.have_fp64 && !c2.have_fp64) return 1;
+    if (!c1.have_fp64 && c2.have_fp64) return -1;
     if (loose) {
         if (c1.attribs.localRAM> 1.4*c2.attribs.localRAM) return 1;
         if (c1.attribs.localRAM< .7* c2.attribs.localRAM) return -1;
@@ -261,10 +256,6 @@ int ati_compare(COPROC_ATI& c1, COPROC_ATI& c2, bool loose) {
     }
     if (c1.attribs.localRAM > c2.attribs.localRAM) return 1;
     if (c1.attribs.localRAM < c2.attribs.localRAM) return -1;
-    double s1 = c1.peak_flops;
-    double s2 = c2.peak_flops;
-    if (s1 > s2) return 1;
-    if (s1 < s2) return -1;
     return 0;
 }
 
@@ -305,6 +296,10 @@ void COPROC_ATI::correlate(
         } else if (this->have_hip && !ati_gpus[i].have_hip) {
             ati_gpus[i].is_used = COPROC_UNUSED;
         } else if (use_all || !ati_compare(ati_gpus[i], *this, true)) {
+            if (count >= MAX_COPROC_INSTANCES) {
+                ati_gpus[i].is_used = COPROC_UNUSED;
+                continue;
+            }
             device_nums[count] = ati_gpus[i].device_num;
             count++;
             ati_gpus[i].is_used = COPROC_USED;
@@ -369,8 +364,13 @@ void COPROC_ATI::get_hip(vector<string>& warnings) {
         cc.hip_version = runtime_version;
         cc.device_num = i;
 
+        // hipDeviceGetName() reports the marketing name ("AMD Radeon RX
+        // 9060 XT").  If it fails, leave the name empty so that the KFD
+        // node name can be used below; the generic fallback is applied
+        // after GPU detection.
+        //
         if (p_hipDeviceGetName(cc.name, sizeof(cc.name), i) != HIP_SUCCESS) {
-            snprintf(cc.name, sizeof(cc.name), "AMD GPU %d", i);
+            cc.name[0] = 0;
         }
 
         int v = 0;
@@ -390,21 +390,21 @@ void COPROC_ATI::get_hip(vector<string>& warnings) {
             cc.hip_memory_bus_width = v;
         }
 
-        // Total VRAM.  hipMemGetInfo() takes size_t; the TotalGlobalMem
-        // attribute is an int and overflows above 2 GB.
+        // VRAM: available_ram is the free amount the scheduler may use;
+        // localRAM is the total.  hipMemGetInfo() takes size_t; the
+        // TotalGlobalMem attribute is an int and overflows above 2 GB.
         //
-        // BOINC's current AMD/OpenCL path reports total VRAM in
-        // available_ram as a fallback, so keep the HIP path consistent.
-        // We still query the runtime to obtain the reliable total size.
-        //
-        double total_mem = 0;
+        double total_mem = 0, free_mem = 0;
         if (p_hipSetDevice && p_hipSetDevice(i) == HIP_SUCCESS) {
             std::size_t free_bytes = 0, total_bytes = 0;
             if (p_hipMemGetInfo(&free_bytes, &total_bytes) == HIP_SUCCESS) {
                 total_mem = (double)total_bytes;
+                free_mem = (double)free_bytes;
             }
         }
-        cc.available_ram = total_mem;
+        // available_ram is what the scheduler may use; localRAM is total.
+        //
+        cc.available_ram = free_mem;
         cc.attribs.localRAM = (int)(total_mem/MEGA);
 
         int bus = -1;
@@ -421,17 +421,24 @@ void COPROC_ATI::get_hip(vector<string>& warnings) {
             }
         }
         cc.pci_bus = bus;
+        if (p_hipDeviceGetAttribute && p_hipDeviceGetAttribute(
+            &v, HIP_DEV_ATTR_PCI_DEVICE_ID, i) == HIP_SUCCESS
+        ) {
+            cc.pci_info.device_id = v;
+        }
 
 #ifdef __linux__
         if (bus >= 0) {
             int gfx_target = 0, simd_count = 0, wave_front = 0, clk_mhz = 0;
+            int pci_device_id = 0;
             double vram = 0;
             char node_name[256];
             node_name[0] = 0;
             if (kfd_lookup(
                 bus, gfx_target, simd_count, wave_front, clk_mhz, vram,
-                node_name, sizeof(node_name))
+                pci_device_id, node_name, sizeof(node_name))
             ) {
+                if (pci_device_id) cc.pci_info.device_id = pci_device_id;
                 cc.gfx_target_version = gfx_target;
                 cc.gfxip_major = gfx_target / 10000;
                 cc.gfxip_minor = (gfx_target / 100) % 100;
@@ -463,17 +470,28 @@ void COPROC_ATI::get_hip(vector<string>& warnings) {
                 if (!cc.attribs.localRAM && vram) {
                     cc.attribs.localRAM = (int)(vram/MEGA);
                 }
-                if (!cc.name[0] && node_name[0]) {
+                if (!cc.name[0] && node_name[0]
+                    && strcmp(node_name, "ip discovery")
+                ) {
                     safe_strcpy(cc.name, node_name);
                 }
             }
         }
 #endif
 
+        if (!cc.name[0]) {
+            snprintf(cc.name, sizeof(cc.name), "AMD GPU %d", i);
+        }
+
         // Without KFD (Windows, or a kernel without amdkfd), the gfx
         // version is still available through the compute capability
-        // attributes: HIP maps gfx major/minor onto them (12/0 for
-        // gfx1200 on RDNA 4).
+        // attributes: HIP maps the gfx major and minor onto them (12/0
+        // for gfx1200 on RDNA 4).  The stepping is not exposed, so the
+        // rendered name is best-effort: family regexes still work, but an
+        // exact per-model pattern may not match.
+        //
+        // Legacy path: fill in the gfx major/minor when KFD did not give
+        // them, but keep a node-name-derived gcn_arch authoritative.
         //
         if (!cc.gfxip_major) {
             int major = 0, minor = 0;
@@ -487,9 +505,11 @@ void COPROC_ATI::get_hip(vector<string>& warnings) {
             cc.gfxip_minor = minor;
             if (major) {
                 cc.gfx_target_version = major*10000 + minor*100;
-                snprintf(cc.gcn_arch, sizeof(cc.gcn_arch),
-                    "gfx%d%d0", major, minor
-                );
+                if (!cc.gcn_arch[0]) {
+                    gfx_target_to_string(
+                        cc.gfx_target_version, cc.gcn_arch, sizeof(cc.gcn_arch)
+                    );
+                }
             }
         }
 
@@ -504,9 +524,14 @@ void COPROC_ATI::get_hip(vector<string>& warnings) {
 
         // Derive the lane count if KFD did not provide it.
         if (!cc.hip_lane_count && cc.hip_cu_count) {
-            cc.hip_lane_count = cc.hip_cu_count
-                * ((cc.hip_warp_size == 32 || (!cc.hip_warp_size && cc.gfxip_major >= 10))
-                    ? 128 : 64);
+            int lanes_per_cu = 64;
+            if (cc.hip_warp_size == 32
+                || (!cc.hip_warp_size && cc.gfxip_major >= 10)
+                || (cc.gfxip_major == 9 && cc.gfx_target_version >= 90400)
+            ) {
+                lanes_per_cu = 128;
+            }
+            cc.hip_lane_count = cc.hip_cu_count * lanes_per_cu;
         }
 
         cc.set_peak_flops();

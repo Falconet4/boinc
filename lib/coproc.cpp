@@ -97,8 +97,10 @@ void COPROC::write_xml(MIOFILE& f, bool scheduler_rpc) {
         "<coproc>\n"
         "   <type>%s</type>\n"
         "   <count>%d</count>\n"
-        "   <peak_flops>%f</peak_flops>\n",
-        type, count, peak_flops
+        "   <peak_flops>%f</peak_flops>\n"
+        "   <peak_flops_dp>%f</peak_flops_dp>\n"
+        "   <have_fp64>%d</have_fp64>\n",
+        type, count, peak_flops, peak_flops_dp, have_fp64 ? 1 : 0
     );
 
     if (scheduler_rpc) {
@@ -165,14 +167,116 @@ int COPROC::parse(XML_PARSER& xp) {
     return ERR_XML_PARSE;
 }
 
+// Length of a valid UTF-8 sequence at p, or 0 if the bytes are not valid
+// UTF-8 (overlong forms, surrogates and out-of-range code points rejected).
+//
+static int utf8_seq_len(const unsigned char* p) {
+    unsigned char c = p[0];
+    if (c < 0xC2) return 0;
+    if (c <= 0xDF) return (p[1] & 0xC0) == 0x80 ? 2 : 0;
+    if (c == 0xE0) {
+        return ((p[1] & 0xE0) == 0xA0 && (p[2] & 0xC0) == 0x80) ? 3 : 0;
+    }
+    if (c <= 0xEC) {
+        return ((p[1] & 0xC0) == 0x80 && (p[2] & 0xC0) == 0x80) ? 3 : 0;
+    }
+    if (c == 0xED) {
+        return ((p[1] & 0xE0) == 0x80 && (p[2] & 0xC0) == 0x80) ? 3 : 0;
+    }
+    if (c <= 0xEF) {
+        return ((p[1] & 0xC0) == 0x80 && (p[2] & 0xC0) == 0x80) ? 3 : 0;
+    }
+    if (c == 0xF0) {
+        return ((p[1] & 0xF0) == 0x90 && (p[2] & 0xC0) == 0x80
+            && (p[3] & 0xC0) == 0x80) ? 4 : 0;
+    }
+    if (c <= 0xF3) {
+        return ((p[1] & 0xC0) == 0x80 && (p[2] & 0xC0) == 0x80
+            && (p[3] & 0xC0) == 0x80) ? 4 : 0;
+    }
+    if (c == 0xF4) {
+        return ((p[1] & 0xF0) == 0x80 && (p[2] & 0xC0) == 0x80
+            && (p[3] & 0xC0) == 0x80) ? 4 : 0;
+    }
+    return 0;
+}
+
+// Escape a string for use inside a JSON string literal.  Driver-supplied
+// names can contain quotes or backslashes, which would otherwise break
+// the JSON that carries this summary.  Valid UTF-8 is passed through;
+// invalid bytes are written as \u00XX so the result is always valid JSON.
+//
+static void json_escape_string(const char* in, char* out, size_t out_size) {
+    size_t j = 0;
+    if (!out_size) return;
+    if (!in) {
+        out[0] = 0;
+        return;
+    }
+    for (; *in; in++) {
+        unsigned char c = (unsigned char)*in;
+        char tmp[8];
+        const char* rep;
+        size_t n;
+        if (c == '"' || c == '\\') {
+            tmp[0] = '\\';
+            tmp[1] = (char)c;
+            rep = tmp;
+            n = 2;
+        } else if (c == '\n') {
+            rep = "\\n";
+            n = 2;
+        } else if (c == '\r') {
+            rep = "\\r";
+            n = 2;
+        } else if (c == '\t') {
+            rep = "\\t";
+            n = 2;
+        } else if (c < 0x20) {
+            snprintf(tmp, sizeof(tmp), "\\u%04x", c);
+            rep = tmp;
+            n = strlen(tmp);
+        } else if (c >= 0x80) {
+            int len = utf8_seq_len((const unsigned char*)in);
+            if (len > 0) {
+                rep = in;
+                n = (size_t)len;
+                in += len - 1;
+            } else {
+                snprintf(tmp, sizeof(tmp), "\\u%04x", c);
+                rep = tmp;
+                n = strlen(tmp);
+            }
+        } else {
+            tmp[0] = (char)c;
+            rep = tmp;
+            n = 1;
+        }
+        if (j + n >= out_size) break;
+        memcpy(out+j, rep, n);
+        j += n;
+    }
+    out[j] = 0;
+}
+
 void summary_json(
-    char *buf,
+    char *buf, size_t len,
     const char *type, const char *model, int count, int ram_mb,
     const char *driver_version, int opencl_version,
-    bool have_hip=false, const char* gcn_arch="", int hip_version=0
+    bool have_hip, const char* gcn_arch, int hip_version
 ) {
+    // Escape buffers: worst case is 6 bytes per input byte (control
+    // characters as \u00XX); the largest input field is the 512-byte
+    // OpenCL driver string, so 4096 is sufficient for every caller.
+    //
+    char etype[4096], emodel[4096], edrv[4096], earch[4096];
+    json_escape_string(type, etype, sizeof(etype));
+    json_escape_string(model, emodel, sizeof(emodel));
+    json_escape_string(driver_version, edrv, sizeof(edrv));
+    json_escape_string(gcn_arch, earch, sizeof(earch));
+
     if (have_hip) {
-        sprintf(buf,
+        snprintf(buf, len,
 "        {\n"\
 "            \"type\": \"%s\",\n"\
 "            \"model\": \"%s\",\n"\
@@ -184,11 +288,11 @@ void summary_json(
 "            \"hip_version\": %d,\n"\
 "            \"gcn_arch\": \"%s\"\n"\
 "        }",
-            type, model, count, ram_mb, driver_version, opencl_version,
-            hip_version, gcn_arch
+            etype, emodel, count, ram_mb, edrv, opencl_version,
+            hip_version, earch
         );
     } else {
-        sprintf(buf,
+        snprintf(buf, len,
 "        {\n"\
 "            \"type\": \"%s\",\n"\
 "            \"model\": \"%s\",\n"\
@@ -197,30 +301,34 @@ void summary_json(
 "            \"driver_version\": \"%s\",\n"\
 "            \"opencl_version\": \"%d\"\n"\
 "        }",
-            type, model, count, ram_mb, driver_version, opencl_version
+            etype, emodel, count, ram_mb, edrv, opencl_version
         );
     }
 }
 
 void COPROCS::summary_string_json(string &out) {
-    char buf2[1024];
+    // Large enough for the worst case: four fields of 256 bytes each,
+    // every byte escaped as \u00XX, plus the surrounding JSON.
+    //
+    char buf2[8192];
     char buf[256];
     out = "";
     if (nvidia.count) {
-        sprintf(buf, "%d", nvidia.display_driver_version);
-        summary_json(buf2,
+        snprintf(buf, sizeof(buf), "%d", nvidia.display_driver_version);
+        summary_json(buf2, sizeof(buf2),
             "nvidia",
             nvidia.cuda_prop.name,
             nvidia.count,
             (int)(nvidia.cuda_prop.totalGlobalMem/MEGA),
             buf,
-            nvidia.opencl_prop.opencl_device_version_int
+            nvidia.opencl_prop.opencl_device_version_int,
+            false, "", 0
         );
         out += buf2;
     }
     if (ati.count) {
         if (!out.empty()) out += ",\n";
-        summary_json(buf2,
+        summary_json(buf2, sizeof(buf2),
             "amd",
             ati.name, ati.count,
             ati.attribs.localRAM, ati.version,
@@ -231,24 +339,26 @@ void COPROCS::summary_string_json(string &out) {
     }
     if (intel_gpu.count) {
         if (!out.empty()) out += ",\n";
-        summary_json(buf2,
+        summary_json(buf2, sizeof(buf2),
             "intel",
             intel_gpu.opencl_prop.name, intel_gpu.count,
             (int)((double)intel_gpu.opencl_prop.global_mem_size/MEGA),
             intel_gpu.opencl_prop.opencl_driver_version,
-            intel_gpu.opencl_prop.opencl_device_version_int
+            intel_gpu.opencl_prop.opencl_device_version_int,
+            false, "", 0
         );
         out += buf2;
     }
     if (apple_gpu.count) {
         if (!out.empty()) out += ",\n";
-        sprintf(buf, "%d", apple_gpu.metal_support);
-        summary_json(buf2,
+        snprintf(buf, sizeof(buf), "%d", apple_gpu.metal_support);
+        summary_json(buf2, sizeof(buf2),
             "apple",
             apple_gpu.model, apple_gpu.count,
             (int)((double)apple_gpu.opencl_prop.global_mem_size/MEGA),
             buf,
-            apple_gpu.opencl_prop.opencl_device_version_int
+            apple_gpu.opencl_prop.opencl_device_version_int,
+            false, "", 0
         );
         out += buf2;
     }
@@ -261,13 +371,14 @@ void COPROCS::summary_string_json(string &out) {
         if (type == PROC_TYPE_APPLE_GPU) continue;
         if (!strlen(cp.opencl_prop.name)) continue;
         if (!out.empty()) out += ",\n";
-        summary_json(buf2,
+        summary_json(buf2, sizeof(buf2),
             cp.opencl_prop.vendor,
             cp.opencl_prop.name,
             cp.count,
             (int)((double)cp.opencl_prop.global_mem_size/MEGA),
             cp.opencl_prop.opencl_device_version,
-            cp.opencl_prop.opencl_device_version_int
+            cp.opencl_prop.opencl_device_version_int,
+            false, "", 0
         );
         out += buf2;
     }
@@ -623,16 +734,53 @@ int COPROC_NVIDIA::parse(XML_PARSER& xp) {
 // These are conservative values for the families BOINC is likely to
 // meet; returning 0 means "unknown" and reports no FP64 figure.
 //
-static double amd_fp64_ratio(int gfxip_major, int gfx_target, const char* name) {
+static double amd_fp64_ratio(
+    int gfxip_major, int gfx_target, const char* name, int pci_device_id
+) {
     if (gfxip_major >= 11) return 1./32.;   // RDNA 3/4
     if (gfxip_major == 10) return 1./16.;   // RDNA 1/2
     if (gfxip_major == 9) {
-        // CDNA 2 (MI200) has a 1:1 FP64 rate; MI100 and CDNA 3/4 are 1:2.
-        if (gfx_target >= 90010 && gfx_target < 90400) return 1.;
-        if (gfx_target >= 90008 && gfx_target < 90600) return 1./2.;
-        if (strstr(name, "Instinct") || strstr(name, "MI")) return 1./2.;
+        // The OpenCL-only path may know the marketing name but not the
+        // gfx target, so identify the FP64-heavy models by name first.
+        // (Not every "Instinct"/"MI" is 1:2: MI25 is a Vega 10 part.)
+        //
+        if (strstr(name, "MI250") || strstr(name, "MI210")) return 1.;
+        if (strstr(name, "MI300") || strstr(name, "MI350")) return 1./2.;
+        if (strstr(name, "MI100")) return 1./2.;
+        if (strstr(name, "MI50") || strstr(name, "MI60")) return 1./2.;
+        if (strstr(name, "Radeon Pro VII")) return 1./2.;
         if (strstr(name, "Radeon VII")) return 1./4.;
-        return 1./16.;                      // Vega consumer
+        if (strstr(name, "MI25")) return 1./16.;
+        // When only the KFD node name is available it is the arch string.
+        if (!strncmp(name, "gfx", 3)) {
+            if (!strcmp(name, "gfx90a")) return 1.;
+            if (!strcmp(name, "gfx908") || !strcmp(name, "gfx940")
+                || !strcmp(name, "gfx942") || !strcmp(name, "gfx950")
+            ) {
+                return 1./2.;
+            }
+            if (!strcmp(name, "gfx90c")) return 1./16.;
+        }
+
+        // gfx906 covers both MI50/MI60 (1:2) and Radeon VII (1:4).
+        // The PCI device ID distinguishes them when no marketing name is
+        // available: 0x66af is Radeon VII, 0x66a1/0x66a3 are the
+        // MI50/Pro VII and MI60/Pro Vega II.
+        //
+        if (gfx_target == 90006 || !strcmp(name, "gfx906")) {
+            if (pci_device_id == 0x66af) return 1./4.;
+            if (pci_device_id == 0x66a1 || pci_device_id == 0x66a3) {
+                return 1./2.;
+            }
+        }
+
+        // Target-based rules.
+        if (gfx_target == 90010) return 1.;    // CDNA 2 (MI200)
+        if (gfx_target == 90008) return 1./2.; // CDNA 1 (MI100)
+        if (gfx_target >= 90400 && gfx_target < 90600) return 1./2.;
+        if (gfx_target >= 90000 && gfx_target <= 90012) return 1./16.;
+        if (gfx_target == 0) return 1./16.;    // gfx9, target unknown: Vega-like
+        return 0.;                             // unknown future gfx9
     }
     if (gfxip_major == 8) return 1./16.;    // Polaris/Fiji
     return 0.;
@@ -645,10 +793,32 @@ static double nvidia_fp64_ratio(int major, int minor) {
     case 9:  return 1./2.;                  // Hopper
     case 8:  return (minor == 0) ? 1./2. : 1./64.;
     case 7:  return (minor == 0) ? 1./2. : 1./32.;
-    case 6:  return (minor == 0 || minor == 1) ? 1./2. : 1./32.;
-        // cc6.0 (P100) and cc6.1 are 1:2; cc6.2 (P40/P4) is 1:32
+    case 6:  return (minor == 0) ? 1./2. : 1./32.;
+        // Only cc6.0 (GP100, Tesla P100) is 1:2.  cc6.1 (GP102/104/106:
+        // GTX 1080/1070/1060, Titan Xp, Tesla P40) and cc6.2 (GP10B)
+        // are 1:32.
     default: return 0.;
     }
+}
+
+// Convert a KFD gfx target version (major*10000 + minor*100 + stepping)
+// to an architecture name (e.g. 120000 -> "gfx1200").  The minor and
+// stepping components are single hex digits in the public name: 9/0/10
+// is "gfx90a", 9/0/12 is "gfx90c", 9/4/2 is "gfx942", 10/3/0 is
+// "gfx1030".
+//
+void gfx_target_to_string(int target, char* buf, int len) {
+    if (len <= 0) return;
+    if (target <= 0) {
+        buf[0] = 0;
+        return;
+    }
+    int major = target / 10000;
+    int minor = (target / 100) % 100;
+    int stepping = target % 100;
+    snprintf(buf, len, "gfx%d%x%x",
+        major, (unsigned)minor, (unsigned)stepping
+    );
 }
 
 void COPROC_NVIDIA::set_peak_flops() {
@@ -761,6 +931,14 @@ void COPROC_NVIDIA::set_peak_flops() {
     if (ratio > 0 && x > 0) {
         peak_flops_dp = x * ratio;
         have_fp64 = true;
+    } else if (x > 0) {
+        // No FP64 ratio applies: either the compute capability is unknown
+        // (no CUDA properties and no NVIDIA extension) or the table does
+        // not cover the architecture.  Fall back to what OpenCL reports,
+        // matching COPROC_ATI::set_peak_flops(): the device may still
+        // support FP64.
+        //
+        have_fp64 = (opencl_prop.double_fp_config != 0);
     }
 }
 
@@ -1140,6 +1318,17 @@ void COPROC_ATI::set_peak_flops() {
                 opencl_prop.amd_simd_per_compute_unit *
                 opencl_prop.amd_simd_width *
                 opencl_prop.amd_simd_instruction_width;
+        } else if (!opencl_prop.gfxip_major
+            && opencl_prop.amd_simd_width
+            && opencl_prop.amd_simd_instruction_width
+        ) {
+            // Architecture unknown (the driver did not report GFXIP):
+            // use the reported SIMD geometry, which is right for both
+            // GCN and RDNA.  Keep the conservative 2 FLOPs per lane.
+            lanes = opencl_prop.max_compute_units *
+                opencl_prop.amd_simd_per_compute_unit *
+                opencl_prop.amd_simd_width *
+                opencl_prop.amd_simd_instruction_width;
         } else {
             // GCN/CDNA: the reported SIMD width is the wavefront (64), not
             // the number of FP32 lanes.  Each CU has 64 (128 on CDNA 3+).
@@ -1165,7 +1354,7 @@ void COPROC_ATI::set_peak_flops() {
     peak_flops_dp = 0;
     have_fp64 = false;
     int gm = gfxip_major ? gfxip_major : (int)opencl_prop.gfxip_major;
-    double ratio = amd_fp64_ratio(gm, gfx_target_version, name);
+    double ratio = amd_fp64_ratio(gm, gfx_target_version, name, pci_info.device_id);
     if (ratio > 0 && x > 0) {
         peak_flops_dp = x * ratio;
         have_fp64 = true;

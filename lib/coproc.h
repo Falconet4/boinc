@@ -351,7 +351,7 @@ struct COPROC_ATI : public COPROC {
     // ROCm/HIP
     //
     bool have_hip;
-    int hip_version;            // HIP runtime version, e.g. 60200
+    int hip_version;            // HIP runtime version, e.g. 60200000 for 6.2.0
     int hip_device_num;         // HIP ordinal
     int hip_cu_count;
     int hip_lane_count;         // total FP32 lanes, if known
@@ -563,5 +563,20 @@ struct COPROCS {
 };
 
 extern void fake_opencl_gpu(char*);
+
+// Convert a KFD gfx target version (major*10000 + minor*100 + stepping)
+// to an architecture name such as "gfx90a" or "gfx1200".
+//
+extern void gfx_target_to_string(int target, char* buf, int len);
+
+// Write one GPU description as a JSON object into buf.
+// Used by COPROCS::summary_string_json().
+//
+extern void summary_json(
+    char* buf, size_t len,
+    const char* type, const char* model, int count, int ram_mb,
+    const char* driver_version, int opencl_version,
+    bool have_hip, const char* gcn_arch, int hip_version
+);
 
 #endif

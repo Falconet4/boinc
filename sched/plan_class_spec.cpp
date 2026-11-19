@@ -776,6 +776,10 @@ bool PLAN_CLASS_SPEC::check(
             log_messages.printf(MSG_NORMAL, "%s\n", msg.c_str());
         }
         gpu_ram = cp.opencl_prop.global_mem_size;
+        if (!gpu_ram) {
+            // HIP-only host: no OpenCL device, but localRAM is total VRAM.
+            gpu_ram = (double)cp.attribs.localRAM * MEGA;
+        }
 
         driver_version = 0;
         if (cp.have_cal) {
@@ -1047,7 +1051,15 @@ bool PLAN_CLASS_SPEC::check(
         // type or breaking existing AMD plan classes.
         //
         if (require_hip || min_hip_version || gcn_arch_regex.is_set()) {
-            if (cpp != &sreq.coprocs.ati || !sreq.coprocs.ati.have_hip) {
+            // cpp points at sreq.coprocs.ati for <gpu_type>amd/ati</gpu_type>,
+            // but at an element of the coprocs array when the class matched
+            // through gpu_type_regex or lookup_type().  Compare the resource
+            // type rather than the address so both paths work.
+            //
+            bool is_amd = (cpp == &sreq.coprocs.ati)
+                || (sreq.coprocs.ati.count
+                    && !strcmp(cpp->type, sreq.coprocs.ati.type));
+            if (!is_amd || !sreq.coprocs.ati.have_hip) {
                 if (config.debug_version_select) {
                     log_messages.printf(MSG_NORMAL,
                         "[version] plan_class_spec: GPU does not support HIP\n"
