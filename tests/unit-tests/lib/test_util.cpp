@@ -16,6 +16,13 @@
 // along with BOINC.  If not, see <http://www.gnu.org/licenses/>.
 
 #ifndef _WIN32
+#include <cstdio>
+#include <cstdlib>
+#include <cerrno>
+#include <cstring>
+#include <sys/stat.h>
+#include <sys/wait.h>
+#include <unistd.h>
 #include "gtest/gtest.h"
 #endif
 #include "util.h"
@@ -68,5 +75,136 @@ namespace test_util {
         EXPECT_TRUE(linux_cpu_time(1) > 0);
     }
 
+#endif
+#ifndef _WIN32
+    TEST_F(test_util, resolve_exe) {
+        char buf[4096];
+        EXPECT_EQ(boinc_resolve_exe("mv", buf, sizeof(buf)), 0);
+        EXPECT_NE(buf[0], '\0');
+        EXPECT_EQ(boinc_resolve_exe("/bin/sh", buf, sizeof(buf)), 0);
+        EXPECT_STREQ(buf, "/bin/sh");
+        EXPECT_EQ(boinc_resolve_exe("", buf, sizeof(buf)), -1);
+        EXPECT_EQ(
+            boinc_resolve_exe("no-such-program-6741", buf, sizeof(buf)), -1
+        );
+    }
+
+    TEST_F(test_util, resolve_exe_relative_to_dir) {
+        char buf[4096];
+        EXPECT_EQ(boinc_resolve_exe("./prog", buf, sizeof(buf), "/tmp/d"), 0);
+        EXPECT_STREQ(buf, "/tmp/d/./prog");
+    }
+
+    TEST_F(test_util, run_program_chdir) {
+        char tmpl[] = "/tmp/boinc_run_program_XXXXXX";
+        char* dir = mkdtemp(tmpl);
+        ASSERT_NE(dir, nullptr);
+
+        char prog[8192];
+        snprintf(prog, sizeof(prog), "%s/prog", dir);
+        FILE* f = fopen(prog, "w");
+        ASSERT_NE(f, nullptr);
+        fputs("#!/bin/sh\n", f);
+        fclose(f);
+        chmod(prog, 0700);
+
+        PROCESS_REF id;
+        char* argv[] = {
+            (char*)"sh", (char*)"-c", (char*)"test -f ./prog", NULL
+        };
+        ASSERT_EQ(run_program(dir, "sh", 3, argv, id), 0);
+        int status = 0;
+        while (waitpid(id, &status, 0) < 0 && errno == EINTR) {
+        }
+        EXPECT_TRUE(WIFEXITED(status));
+        EXPECT_EQ(WEXITSTATUS(status), 0);
+
+        unlink(prog);
+        rmdir(dir);
+    }
+    TEST_F(test_util, resolve_exe_relative_dir) {
+        char cwd[4096];
+        ASSERT_NE(getcwd(cwd, sizeof(cwd)), nullptr);
+        char tmpl[] = "/tmp/boinc_reldir_XXXXXX";
+        char* dir = mkdtemp(tmpl);
+        ASSERT_NE(dir, nullptr);
+        ASSERT_EQ(chdir(dir), 0);
+
+        char buf[4096];
+        EXPECT_EQ(boinc_resolve_exe("./prog", buf, sizeof(buf), "sub"), 0);
+        char expect[8192];
+        snprintf(expect, sizeof(expect), "%s/sub/./prog", dir);
+        EXPECT_STREQ(buf, expect);
+
+        ASSERT_EQ(chdir(cwd), 0);
+        rmdir(dir);
+    }
+
+    TEST_F(test_util, resolve_exe_skips_directory) {
+        char tmpl[] = "/tmp/boinc_shadow_XXXXXX";
+        char* dir = mkdtemp(tmpl);
+        ASSERT_NE(dir, nullptr);
+        char shadow[8192];
+        snprintf(shadow, sizeof(shadow), "%s/mv", dir);
+        ASSERT_EQ(mkdir(shadow, 0700), 0);
+
+        char oldpath[4096] = "";
+        const char* old = getenv("PATH");
+        if (old) snprintf(oldpath, sizeof(oldpath), "%s", old);
+        char newpath[8192];
+        snprintf(newpath, sizeof(newpath), "%s:/usr/bin:/bin", dir);
+        setenv("PATH", newpath, 1);
+
+        char buf[4096];
+        EXPECT_EQ(boinc_resolve_exe("mv", buf, sizeof(buf)), 0);
+        // Do not assume /usr/bin/mv: accept any /mv that is not the
+        // directory we planted in PATH.
+        const char* sl = strrchr(buf, '/');
+        EXPECT_NE(sl, nullptr);
+        EXPECT_STREQ(sl ? sl : "", "/mv");
+        EXPECT_STRNE(buf, shadow);
+
+        if (old) {
+            setenv("PATH", oldpath, 1);
+        } else {
+            unsetenv("PATH");
+        }
+        rmdir(shadow);
+        rmdir(dir);
+    }
+
+    TEST_F(test_util, run_program_relative_dir) {
+        char cwd[4096];
+        ASSERT_NE(getcwd(cwd, sizeof(cwd)), nullptr);
+        char tmpl[] = "/tmp/boinc_relrun_XXXXXX";
+        char* dir = mkdtemp(tmpl);
+        ASSERT_NE(dir, nullptr);
+
+        char sub[8192];
+        snprintf(sub, sizeof(sub), "%s/sub", dir);
+        ASSERT_EQ(mkdir(sub, 0700), 0);
+        char prog[sizeof(sub)+8];
+        snprintf(prog, sizeof(prog), "%s/prog", sub);
+        FILE* f = fopen(prog, "w");
+        ASSERT_NE(f, nullptr);
+        fputs("#!/bin/sh\nexit 0\n", f);
+        fclose(f);
+        chmod(prog, 0700);
+
+        ASSERT_EQ(chdir(dir), 0);
+        PROCESS_REF id;
+        char* argv[] = {(char*)"./prog", NULL};
+        ASSERT_EQ(run_program("sub", "./prog", 1, argv, id), 0);
+        int status = 0;
+        while (waitpid(id, &status, 0) < 0 && errno == EINTR) {
+        }
+        EXPECT_TRUE(WIFEXITED(status));
+        EXPECT_EQ(WEXITSTATUS(status), 0);
+
+        ASSERT_EQ(chdir(cwd), 0);
+        unlink(prog);
+        rmdir(sub);
+        rmdir(dir);
+    }
 #endif
 }

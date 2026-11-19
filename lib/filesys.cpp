@@ -33,6 +33,7 @@
 #include <cstring>
 #include <cstdlib>
 #include <sys/time.h>
+#include <sys/wait.h>
 #include <unistd.h>
 #include <dirent.h>
 
@@ -749,6 +750,108 @@ int boinc_copy_attributes(const char* orig, const char* newf) {
 }
 #endif
 
+#ifndef _WIN32
+// rename() cannot move across filesystems.  For a directory, use mv with
+// argv rather than a shell so project-supplied names cannot be injected.
+//
+// Resolve mv before fork()ing and use execve() in the child: the client
+// is multithreaded, and exec functions that search PATH are not
+// async-signal-safe.
+//
+// environ is declared here rather than in a header: it is provided by
+// the C runtime, and the standard headers that expose it differ by
+// platform.  This file-local declaration keeps the dependency explicit.
+//
+extern char** environ;
+
+static int boinc_move_dir(const char* old, const char* newf) {
+    char mv[4096];
+    if (boinc_resolve_exe("mv", mv, sizeof(mv))) {
+        return ERR_RENAME;
+    }
+    pid_t pid = fork();
+    if (pid < 0) return ERR_RENAME;
+    if (pid == 0) {
+        char dashdash[] = "--";
+        char* argv[] = {
+            mv, dashdash, const_cast<char*>(old), const_cast<char*>(newf),
+            NULL
+        };
+        execve(mv, argv, environ);
+        _exit(127);
+    }
+    int status = 0;
+    pid_t w;
+    while ((w = waitpid(pid, &status, 0)) < 0) {
+        if (errno == EINTR) continue;
+        if (errno == ECHILD) {
+            // Another thread (the client's catch-all reaper) or an
+            // inherited SIGCHLD=SIG_IGN disposition already reaped the
+            // child.  Infer the outcome from the filesystem; the move is
+            // atomic enough for this purpose (mv has exited by now).
+            // lstat() so a moved symlink counts as present.  Only ENOENT
+            // on the source means it really moved; another lstat error
+            // (EACCES, EINTR) must not be reported as success.
+            //
+            struct stat st_old, st_new;
+            if (lstat(old, &st_old) != 0) {
+                if (errno == ENOENT && lstat(newf, &st_new) == 0) {
+                    return 0;
+                }
+            }
+        }
+        return ERR_RENAME;
+    }
+    (void)w;
+    if (WIFEXITED(status) && WEXITSTATUS(status) == 0) return 0;
+    return ERR_RENAME;
+}
+#endif
+
+// Copy a regular file to a temporary name in the destination directory,
+// then rename it into place.  This keeps the destination atomic (no
+// truncated file at the final name) and replaces a destination symlink
+// instead of writing through it, matching rename()/mv semantics.
+//
+static int boinc_copy_atomic(const char* old, const char* newf) {
+    char dir[MAXPATHLEN], tmp[MAXPATHLEN];
+    boinc_path_to_dir(newf, dir);
+    auto out = boinc_temp_file(dir, "ren", tmp);
+    if (!out) return ERR_FOPEN;
+    auto in = boinc_fopen(old, "rb");
+    if (!in) {
+        boinc::fclose(out);
+        boinc_delete_file(tmp);
+        return ERR_FOPEN;
+    }
+    int retval = 0;
+    unsigned char buf[65536];
+    while (1) {
+        size_t n = boinc::fread(buf, 1, sizeof(buf), in);
+        if (n == 0) {
+            if (!boinc::feof(in)) retval = ERR_FREAD;
+            break;
+        }
+        if (boinc::fwrite(buf, 1, n, out) != n) {
+            retval = ERR_FWRITE;
+            break;
+        }
+    }
+    if (boinc::fclose(in) && !retval) retval = ERR_FCLOSE;
+    if (boinc::fclose(out) && !retval) retval = ERR_FCLOSE;
+    if (retval) {
+        boinc_delete_file(tmp);
+        return retval;
+    }
+    (void) boinc_copy_attributes(old, tmp);
+    if (rename(tmp, newf)) {
+        boinc_delete_file(tmp);
+        return ERR_RENAME;
+    }
+    if (boinc_delete_file(old)) return ERR_RENAME;
+    return 0;
+}
+
 static int boinc_rename_aux(const char* old, const char* newf) {
 #ifdef _WIN32
     // MOVEFILE_COPY_ALLOWED is needed if destination is on another volume (move is simulated by copy&delete)
@@ -761,13 +864,35 @@ static int boinc_rename_aux(const char* old, const char* newf) {
     //
     int retval = rename(old, newf);
     if (retval) {
+        // Only a cross-device move needs the fallback.  EACCES, EPERM,
+        // EISDIR and friends are real errors; copying would either fail
+        // too or silently change the semantics.
+        //
+        int rename_errno = errno;
+        if (rename_errno != EXDEV) return ERR_RENAME;
         struct stat sbuf;
         if (lstat(old, &sbuf)) return ERR_STAT;
-        if (!S_ISREG(sbuf.st_mode)) return ERR_RENAME;
-        retval = boinc_copy(old, newf);
+        // rename(2) replaces an existing *empty* directory and fails
+        // otherwise; mv would silently move the source inside it.  Keep
+        // rename semantics rather than return success at the wrong path.
+        //
+        struct stat dsbuf;
+        if (lstat(newf, &dsbuf) == 0 && S_ISDIR(dsbuf.st_mode)) {
+            return ERR_RENAME;
+        }
+        if (S_ISDIR(sbuf.st_mode)) {
+            return boinc_move_dir(old, newf);
+        }
+        if (!S_ISREG(sbuf.st_mode)) {
+            // A symlink, FIFO, socket or device cannot be copied with
+            // boinc_copy().  mv recreates it on the destination
+            // filesystem; boinc_move_dir() runs mv with an argv, so
+            // project-supplied names are not shell-injectable.
+            //
+            return boinc_move_dir(old, newf);
+        }
+        retval = boinc_copy_atomic(old, newf);
         if (retval) return retval;
-        (void) boinc_copy_attributes(old, newf);
-        retval = boinc_delete_file(old);
     }
     if (retval) return ERR_RENAME;
     return 0;
