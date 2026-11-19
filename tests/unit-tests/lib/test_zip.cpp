@@ -450,7 +450,9 @@ namespace test_zip {
     TEST_F(test_zip, Test_boinc_unzip_sample_zip_and_check_permissions) {
         // This test assumes the existence of a sample zip file "sample.zip"
         // with known contents and permissions. Adjust the path as necessary.
-        filesystem::path sample_zip = filesystem::current_path().parent_path() / "unit-tests"/ "testdata" / "test_unix_permissions.zip";
+        filesystem::path sample_zip =
+            filesystem::absolute(__FILE__).parent_path().parent_path()
+            / "testdata" / "test_unix_permissions.zip";
         ASSERT_TRUE(filesystem::exists(sample_zip)) << "Sample zip file does not exist.";
 
         filesystem::path unzip_dir = "sample_unzipped";

@@ -39,15 +39,8 @@ namespace test_md5_file {
     TEST_F(test_md5_file, md5_file) {
         char output[33];
         double bytes;
-#ifdef _WIN32
-        const filesystem::path md5_file_path = filesystem::current_path()
-            .parent_path().parent_path().parent_path().parent_path() /
-            "tests" / "unit-tests" / "lib" /"test_md5_file.txt";
-#else
         const filesystem::path md5_file_path =
-            filesystem::current_path().parent_path() /
-            "unit-tests"/ "lib" / "test_md5_file.txt";
-#endif
+            filesystem::absolute(__FILE__).parent_path() / "test_md5_file.txt";
         int result = md5_file(md5_file_path.string().c_str(), output, bytes);
         EXPECT_EQ(result, 0);
         EXPECT_STREQ(output, "3b13c74a05696e71f9aeb4e6f10cbae8");
