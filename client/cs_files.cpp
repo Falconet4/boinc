@@ -210,6 +210,7 @@ int FILE_INFO::verify_file(
                 ASYNC_VERIFY* avp = new ASYNC_VERIFY;
                 retval = avp->init(this);
                 if (retval) {
+                    delete avp;
                     status = retval;
                     return retval;
                 }
@@ -284,6 +285,7 @@ int FILE_INFO::verify_file(
             ASYNC_VERIFY* avp = new ASYNC_VERIFY();
             retval = avp->init(this);
             if (retval) {
+                delete avp;
                 status = retval;
                 return retval;
             }
@@ -328,6 +330,7 @@ int FILE_INFO::verify_file(
                 ASYNC_VERIFY* avp = new ASYNC_VERIFY();
                 retval = avp->init(this);
                 if (retval) {
+                    delete avp;
                     status = retval;
                     return retval;
                 }

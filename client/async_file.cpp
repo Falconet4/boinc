@@ -80,6 +80,7 @@ int ASYNC_COPY::init(
 #endif
     if (!out) {
         fclose(in);
+        in = NULL;
         return ERR_FOPEN;
     }
     atp->async_copy = this;
@@ -202,8 +203,10 @@ int ASYNC_VERIFY::init(FILE_INFO* _fip) {
         safe_strcat(inpath, ".gz");
         gzin = gzopen(inpath, "rb");
         if (gzin == Z_NULL) {
-            fclose(out);
-            boinc_delete_file(temp_path);
+            // Let the destructor own the cleanup.  Closing/deleting here
+            // would make it run twice because init() failures are deleted
+            // by the caller.
+            //
             return ERR_FOPEN;
         }
     } else {
@@ -217,6 +220,27 @@ int ASYNC_VERIFY::init(FILE_INFO* _fip) {
 
 // the MD5 has been computed.  Finish up.
 //
+ASYNC_VERIFY::~ASYNC_VERIFY() {
+    // Error paths can leave one or more of these open.
+    //
+    if (gzin) {
+        gzclose(gzin);
+        gzin = NULL;
+    }
+    if (in) {
+        fclose(in);
+        in = NULL;
+    }
+    if (out) {
+        fclose(out);
+        out = NULL;
+    }
+    if (temp_path[0]) {
+        boinc_delete_file(temp_path);
+        temp_path[0] = 0;
+    }
+}
+
 void ASYNC_VERIFY::finish() {
     unsigned char binout[16];
     char md5_buf[64];
@@ -275,7 +299,15 @@ int ASYNC_VERIFY::verify_chunk() {
             // done
             //
             gzclose(gzin);
-            fclose(out);
+            gzin = NULL;
+            if (fclose(out)) {
+                // A delayed write error (ENOSPC, quota) must not leave a
+                // truncated file marked present.
+                out = NULL;
+                error(ERR_FWRITE);
+                return 1;
+            }
+            out = NULL;
             delete_project_owned_file(inpath, true);
             boinc_rename(temp_path, outpath);
             finish();
@@ -294,6 +326,7 @@ int ASYNC_VERIFY::verify_chunk() {
         n = fread(buf, 1, BUFSIZE, in);
         if (!n || ferror(in)) {
             fclose(in);
+            in = NULL;
             finish();
             return 1;
         } else {
@@ -331,8 +364,10 @@ void do_async_file_op() {
         return;
     }
     if (async_verifies.size()) {
-        if (async_verifies[0]->verify_chunk()) {
+        ASYNC_VERIFY* avp = async_verifies[0];
+        if (avp->verify_chunk()) {
             async_verifies.erase(async_verifies.begin());
+            delete avp;
         }
     }
 }

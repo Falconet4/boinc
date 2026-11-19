@@ -154,8 +154,14 @@ void log_message_error(const char* msg, int error_code) {
 }
 
 #ifndef _WIN32
+// Only async-signal-safe operations are allowed in a signal handler.
+// msg_printf() locks, allocates and formats; calling it here could
+// deadlock the client if the signal arrives while the main thread holds
+// the stdio lock.
+//
+static volatile sig_atomic_t g_received_signal = 0;
+
 static void signal_handler(int signum, siginfo_t*, void*) {
-    msg_printf(NULL, MSG_INFO, "Received signal %d", signum);
     switch(signum) {
     case SIGHUP:
     case SIGINT:
@@ -164,14 +170,15 @@ static void signal_handler(int signum, siginfo_t*, void*) {
 #ifdef SIGPWR
     case SIGPWR:
 #endif
+        // Set the exit flag here as well: got_select() relies on it to
+        // avoid a blocking accept() after a signal.  It is sig_atomic_t,
+        // so the store is async-signal-safe.
+        //
         gstate.requested_exit = true;
-#ifdef __EMX__
-        // close socket
-        shutdown(gstate.gui_rpcs.lsock, 2);
-#endif
+        g_received_signal = signum;
         break;
     default:
-        msg_printf(NULL, MSG_INTERNAL_ERROR, "Signal not handled");
+        break;
     }
 }
 #endif
@@ -439,6 +446,19 @@ int boinc_main_loop() {
             gstate.do_io_or_sleep(POLL_INTERVAL);
         }
 
+#ifndef _WIN32
+        if (g_received_signal) {
+            // Log from the main loop, not from the signal handler.
+            int signum = (int)g_received_signal;
+            g_received_signal = 0;
+            msg_printf(NULL, MSG_INFO, "Received signal %d", signum);
+#ifdef __EMX__
+            // close socket
+            shutdown(gstate.gui_rpcs.lsock, 2);
+#endif
+            gstate.requested_exit = true;
+        }
+#endif
         if (gstate.time_to_exit()) {
             msg_printf(NULL, MSG_INFO, "Time to exit");
             break;
