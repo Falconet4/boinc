@@ -1,0 +1,137 @@
+// This file is part of BOINC.
+// https://boinc.berkeley.edu
+// Copyright (C) 2026 University of California
+//
+// BOINC is free software; you can redistribute it and/or modify it
+// under the terms of the GNU Lesser General Public License
+// as published by the Free Software Foundation,
+// either version 3 of the License, or (at your option) any later version.
+//
+// BOINC is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+// See the GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with BOINC.  If not, see <http://www.gnu.org/licenses/>.
+
+#include "gtest/gtest.h"
+#include "plan_class_spec.h"
+#include <cstdio>
+
+static COPROC_ATI_DEVICE make_device(
+    const char* name, const char* arch, int device_num, bool fp64,
+    double fp32, double fp64_peak, double ram
+) {
+    COPROC_ATI_DEVICE d;
+    snprintf(d.name, sizeof(d.name), "%s", name);
+    snprintf(d.gcn_arch, sizeof(d.gcn_arch), "%s", arch);
+    d.device_num = device_num;
+    d.have_hip = true;
+    d.hip_version = 60200000;
+    d.have_fp64 = fp64;
+    d.peak_flops = fp32;
+    d.peak_flops_dp = fp64_peak;
+    d.total_ram = ram;
+    return d;
+}
+
+TEST(test_plan_class_spec, amd_require_fp64) {
+    AMD_DEVICE_REQUIREMENTS spec;
+    COPROC_ATI_DEVICE fp64 = make_device(
+        "MI50", "gfx906", 0, true, 26.5e12, 13.25e12, 32.*1024.*1024.*1024.
+    );
+    COPROC_ATI_DEVICE consumer = make_device(
+        "RX 9060 XT", "gfx1200", 1, false, 22.7e12, 0, 16.*1024.*1024.*1024.
+    );
+    spec.require_fp64 = true;
+    double ram = 0;
+    const char* why = NULL;
+    EXPECT_TRUE(amd_device_matches(spec, fp64, ram, &why));
+    EXPECT_DOUBLE_EQ(ram, fp64.total_ram);
+    EXPECT_FALSE(amd_device_matches(spec, consumer, ram, &why));
+}
+
+TEST(test_plan_class_spec, amd_arch_and_hip) {
+    AMD_DEVICE_REQUIREMENTS spec;
+    PLAN_CLASS_REGEX arch_regex;
+    ASSERT_EQ(arch_regex.compile("^gfx9", REG_EXTENDED), 0);
+    spec.gcn_arch_regex = &arch_regex;
+    COPROC_ATI_DEVICE mi = make_device(
+        "MI50", "gfx906", 0, true, 26.5e12, 13.25e12, 32.*1024.*1024.*1024.
+    );
+    COPROC_ATI_DEVICE rdna = make_device(
+        "RX 9060 XT", "gfx1200", 1, false, 22.7e12, 0, 16.*1024.*1024.*1024.
+    );
+    double ram = 0;
+    EXPECT_TRUE(amd_device_matches(spec, mi, ram, NULL));
+    EXPECT_FALSE(amd_device_matches(spec, rdna, ram, NULL));
+
+    AMD_DEVICE_REQUIREMENTS spec2;
+    spec2.require_hip = true;
+    COPROC_ATI_DEVICE no_hip = mi;
+    no_hip.have_hip = false;
+    EXPECT_FALSE(amd_device_matches(spec2, no_hip, ram, NULL));
+    spec2.min_hip_version = 60300000;
+    EXPECT_FALSE(amd_device_matches(spec2, mi, ram, NULL));
+}
+
+TEST(test_plan_class_spec, amd_matching_set) {
+    AMD_DEVICE_REQUIREMENTS req;
+    req.require_fp64 = true;
+
+    COPROC_ATI cp;
+    cp.clear();
+    cp.devices.push_back(make_device(
+        "MI50", "gfx906", 0, true, 26.5e12, 13.25e12, 32.*1024.*1024.*1024.
+    ));
+    cp.devices.push_back(make_device(
+        "RX 9060 XT", "gfx1200", 1, false, 22.7e12, 0, 16.*1024.*1024.*1024.
+    ));
+    cp.count = 2;
+    cp.device_nums[0] = 0;
+    cp.device_nums[1] = 1;
+
+    int nums[MAX_COPROC_INSTANCES];
+    int best = -1;
+    double min_ram = 0;
+    int n = amd_matching_devices(req, cp, nums, MAX_COPROC_INSTANCES, best, min_ram);
+    ASSERT_EQ(n, 1);
+    EXPECT_EQ(nums[0], 0);
+    EXPECT_EQ(best, 0);
+    EXPECT_DOUBLE_EQ(min_ram, 32.*1024.*1024.*1024.);
+
+    // Ignored/unavailable devices are not selected.
+    cp.device_nums[0] = 1;
+    n = amd_matching_devices(req, cp, nums, MAX_COPROC_INSTANCES, best, min_ram);
+    EXPECT_EQ(n, 0);
+}
+
+TEST(test_plan_class_spec, amd_ram_and_peak) {
+    AMD_DEVICE_REQUIREMENTS spec;
+    spec.min_gpu_ram_mb = 20. * 1024.;
+    COPROC_ATI_DEVICE mi = make_device(
+        "MI50", "gfx906", 0, true, 26.5e12, 13.25e12, 32.*1024.*1024.*1024.
+    );
+    COPROC_ATI_DEVICE small = make_device(
+        "RX 9060 XT", "gfx1200", 1, false, 22.7e12, 0, 16.*1024.*1024.*1024.
+    );
+    double ram = 0;
+    EXPECT_TRUE(amd_device_matches(spec, mi, ram, NULL));
+    EXPECT_FALSE(amd_device_matches(spec, small, ram, NULL));
+
+    AMD_DEVICE_REQUIREMENTS spec2;
+    spec2.min_gpu_peak_flops = 24e12;
+    EXPECT_TRUE(amd_device_matches(spec2, mi, ram, NULL));
+    EXPECT_FALSE(amd_device_matches(spec2, small, ram, NULL));
+
+    AMD_DEVICE_REQUIREMENTS spec3;
+    spec3.max_gpu_peak_flops = 24e12;
+    EXPECT_FALSE(amd_device_matches(spec3, mi, ram, NULL));
+    EXPECT_TRUE(amd_device_matches(spec3, small, ram, NULL));
+
+    AMD_DEVICE_REQUIREMENTS spec4;
+    spec4.min_gpu_dp_flops = 10e12;
+    EXPECT_TRUE(amd_device_matches(spec4, mi, ram, NULL));
+    EXPECT_FALSE(amd_device_matches(spec4, small, ram, NULL));
+}

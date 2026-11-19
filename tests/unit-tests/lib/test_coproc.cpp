@@ -20,6 +20,7 @@
 #include <string>
 #include <gtest/gtest.h>
 
+#include "parse.h"
 #include "coproc.h"
 
 // GCN has one FMA per lane per clock: 2 FLOPs.
@@ -110,6 +111,141 @@ TEST(test_coproc, fp64_rdna2) {
     c.set_peak_flops();
     EXPECT_TRUE(c.have_fp64);
     EXPECT_DOUBLE_EQ(c.peak_flops_dp, c.peak_flops / 16.);
+}
+
+// Every physical AMD GPU is reported individually; aggregate scheduling
+// fields remain separate.
+//
+TEST(test_coproc, parse_device_num_list) {
+    int nums[MAX_COPROC_INSTANCES];
+    int n = 0;
+    parse_device_num_list("0 2 7", nums, n);
+    ASSERT_EQ(n, 3);
+    EXPECT_EQ(nums[0], 0);
+    EXPECT_EQ(nums[1], 2);
+    EXPECT_EQ(nums[2], 7);
+    parse_device_num_list("  1\t3 bad 999 -1 ", nums, n);
+    ASSERT_EQ(n, 2);
+    EXPECT_EQ(nums[0], 1);
+    EXPECT_EQ(nums[1], 3);
+    parse_device_num_list("", nums, n);
+    EXPECT_EQ(n, 0);
+}
+
+TEST(test_coproc, device_num_allowed) {
+    int nums[] = {0, 2};
+    EXPECT_TRUE(device_num_allowed(NULL, 0, 1));   // no restriction
+    EXPECT_TRUE(device_num_allowed(nums, 2, 0));
+    EXPECT_TRUE(device_num_allowed(nums, 2, 2));
+    EXPECT_FALSE(device_num_allowed(nums, 2, 1));
+}
+
+TEST(test_coproc, per_device_list_from_hip) {
+    std::vector<COPROC_ATI> hip(2);
+    hip[0].clear();
+    strcpy(hip[0].name, "AMD Radeon RX 9060 XT");
+    strcpy(hip[0].gcn_arch, "gfx1200");
+    hip[0].gfx_target_version = 120000;
+    hip[0].device_num = 0;
+    hip[0].hip_version = 60200000;
+    hip[0].have_fp64 = true;
+    hip[0].peak_flops = 22.7e12;
+    hip[0].peak_flops_dp = 22.7e12/32.;
+    hip[0].attribs.localRAM = 16384;
+
+    hip[1].clear();
+    strcpy(hip[1].name, "AMD Instinct MI50");
+    strcpy(hip[1].gcn_arch, "gfx906");
+    hip[1].gfx_target_version = 90006;
+    hip[1].device_num = 1;
+    hip[1].hip_version = 60200000;
+    hip[1].have_fp64 = true;
+    hip[1].peak_flops = 26.5e12;
+    hip[1].peak_flops_dp = 13.25e12;
+    hip[1].attribs.localRAM = 32768;
+
+    COPROC_ATI agg;
+    agg.clear();
+    std::vector<OPENCL_DEVICE_PROP> none;
+    agg.set_devices(hip, none);
+    ASSERT_EQ(agg.devices.size(), 2u);
+    EXPECT_STREQ(agg.devices[0].name, "AMD Radeon RX 9060 XT");
+    EXPECT_STREQ(agg.devices[0].gcn_arch, "gfx1200");
+    EXPECT_EQ(agg.devices[0].device_num, 0);
+    EXPECT_DOUBLE_EQ(agg.devices[0].total_ram, 16384.*1024.*1024.);
+    EXPECT_STREQ(agg.devices[1].name, "AMD Instinct MI50");
+    EXPECT_STREQ(agg.devices[1].gcn_arch, "gfx906");
+    EXPECT_EQ(agg.devices[1].device_num, 1);
+    EXPECT_DOUBLE_EQ(agg.devices[1].total_ram, 32768.*1024.*1024.);
+    EXPECT_DOUBLE_EQ(agg.devices[1].peak_flops_dp, 13.25e12);
+}
+
+TEST(test_coproc, per_device_xml_roundtrip) {
+    COPROC_ATI a;
+    a.clear();
+    a.devices.clear();
+    COPROC_ATI_DEVICE d;
+    strcpy(d.name, "AMD Radeon RX 9060 XT");
+    strcpy(d.gcn_arch, "gfx1200");
+    d.gfx_target_version = 120000;
+    d.device_num = 0;
+    d.hip_version = 60200000;
+    d.have_fp64 = true;
+    d.peak_flops = 22.7e12;
+    d.peak_flops_dp = 22.7e12/32.;
+    d.total_ram = 16.*1024.*1024.*1024.;
+    a.devices.push_back(d);
+    d.clear();
+    strcpy(d.name, "AMD Instinct MI50");
+    strcpy(d.gcn_arch, "gfx906");
+    d.gfx_target_version = 90006;
+    d.device_num = 1;
+    d.have_fp64 = true;
+    d.total_ram = 32.*1024.*1024.*1024.;
+    a.devices.push_back(d);
+
+    char buf[4096];
+    MIOFILE w;
+    w.init_buf_write(buf, sizeof(buf));
+    a.write_xml(w, false);
+    MIOFILE r;
+    r.init_buf_read(buf);
+    XML_PARSER xp(&r);
+    ASSERT_TRUE(xp.parse_start("coproc_ati"));
+    COPROC_ATI b;
+    ASSERT_EQ(b.parse(xp), 0);
+    ASSERT_EQ(b.devices.size(), 2u);
+    EXPECT_STREQ(b.devices[0].name, "AMD Radeon RX 9060 XT");
+    EXPECT_STREQ(b.devices[0].gcn_arch, "gfx1200");
+    EXPECT_EQ(b.devices[0].device_num, 0);
+    EXPECT_DOUBLE_EQ(b.devices[0].total_ram, 16.*1024.*1024.*1024.);
+    EXPECT_STREQ(b.devices[1].name, "AMD Instinct MI50");
+    EXPECT_STREQ(b.devices[1].gcn_arch, "gfx906");
+    EXPECT_EQ(b.devices[1].device_num, 1);
+    EXPECT_DOUBLE_EQ(b.devices[1].total_ram, 32.*1024.*1024.*1024.);
+}
+
+TEST(test_coproc, per_device_list_opencl_only) {
+    std::vector<COPROC_ATI> none;
+    std::vector<OPENCL_DEVICE_PROP> ocl(1);
+    ocl[0].clear();
+    strcpy(ocl[0].name, "AMD Radeon Graphics");
+    ocl[0].gfxip_major = 10;
+    ocl[0].gfxip_minor = 3;
+    ocl[0].device_num = 0;
+    ocl[0].global_mem_size = 8.*1024.*1024.*1024.;
+    ocl[0].peak_flops = 8.0e12;
+    ocl[0].peak_flops_dp = 0.5e12;
+    ocl[0].have_fp64 = true;
+
+    COPROC_ATI agg;
+    agg.clear();
+    agg.set_devices(none, ocl);
+    ASSERT_EQ(agg.devices.size(), 1u);
+    EXPECT_STREQ(agg.devices[0].name, "AMD Radeon Graphics");
+    EXPECT_STREQ(agg.devices[0].gcn_arch, "gfx1030");
+    EXPECT_TRUE(agg.devices[0].have_fp64);
+    EXPECT_DOUBLE_EQ(agg.devices[0].total_ram, 8.*1024.*1024.*1024.);
 }
 
 // gfx906 covers both MI50/MI60 (1:2) and Radeon VII (1:4).  When the

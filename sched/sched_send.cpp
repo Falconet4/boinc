@@ -1091,6 +1091,10 @@ int add_result_to_reply(
         return retval;
     }
     result.bav = *bavp;
+    result.n_gpu_device_nums = host_usage.n_gpu_device_nums;
+    for (int i=0; i<host_usage.n_gpu_device_nums; i++) {
+        result.gpu_device_nums[i] = host_usage.gpu_device_nums[i];
+    }
     g_reply->insert_result(result);
 
     // decrement the work requests (seconds and instances)

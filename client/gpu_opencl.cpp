@@ -268,16 +268,6 @@ void COPROCS::get_opencl(
     char buf[256];
     OPENCL_DEVICE_PROP opencl_prop;
     int current_CUDA_index;
-    int current_CAL_index;
-    int min_CAL_target;
-    // Only count CAL devices: HIP entries also live in ati_gpus, and
-    // treating them as CAL devices would make the CAL/OpenCL matching
-    // below clear the whole vector on a mismatch.
-    //
-    int num_CAL_devices = 0;
-    for (unsigned int i=0; i<ati_gpus.size(); i++) {
-        if (ati_gpus[i].have_cal) num_CAL_devices++;
-    }
     vector<int>devnums_pci_slot_sort;
     vector<OPENCL_DEVICE_PROP>::iterator it;
     int max_other_coprocs = MAX_RSC-1;  // coprocs[0] is reserved for CPU
@@ -485,44 +475,6 @@ void COPROCS::get_opencl(
         //
         current_CUDA_index = 0;
 
-        // ATI/AMD OpenCL does not always recognize all GPUs returned by CAL.
-        // This is complicated for several reasons:
-        // * CAL returns only an enum (CALtargetEnum) for the GPU's family,
-        //   not specific model information.
-        // * OpenCL return only the GPU family name
-        // * Which GPUs support OpenCL varies with different versions of the
-        //   AMD Catalyst drivers.
-        //
-        // To deal with this, we make some (probably imperfect) assumptions:
-        // * AMD drivers eliminate OpenCL support for older GPU families first.
-        // * Lower values of CALtargetEnum represent older GPU families.
-        // * All ATI/AMD GPUs reported by OpenCL are also reported by CAL (on
-        //   systems where CAL is available) though the converse may not be true.
-        //
-        current_CAL_index = 0;
-        min_CAL_target = 0;
-        if (is_AMD(platform_vendor) && (num_CAL_devices > 0)) {
-            while (1) {
-                int numToMatch = 0;
-                for (int i=0; i<num_CAL_devices; ++i) {
-                    if ((int)ati_gpus[i].attribs.target >= min_CAL_target) {
-                        ++numToMatch;
-                    }
-                }
-                if (numToMatch == (int)num_devices) break;
-                if (numToMatch < (int)num_devices) {
-                    gpu_warning(warnings, "Could not match ATI OpenCL and CAL GPUs: ignoring CAL.");
-                    // If we can't match ATI OpenCL and CAL GPUs, ignore CAL
-                    // and keep OpenCL because AMD has deprecated CAL.
-                    ati_gpus.clear();
-                    ati.have_cal = false;
-                    num_CAL_devices = 0;
-                    break;
-                }
-                ++min_CAL_target;
-            }
-        }
-
         for (device_index=0; device_index<num_devices; ++device_index) {
             opencl_prop.clear();
             opencl_prop.device_id = devices[device_index];
@@ -625,81 +577,30 @@ void COPROCS::get_opencl(
                 //////////// AMD / ATI //////////////
                 opencl_prop.opencl_device_index = device_index;
 
-                if (ati.have_cal) {
-                    // AMD OpenCL does not recognize all AMD GPUs returned by
-                    // CAL but we assume that OpenCL and CAL return devices in
-                    // the same order.  See additional comments earlier in
-                    // this source file for more details.
-                    //
-                    while (1) {
-                        if (current_CAL_index >= num_CAL_devices) {
-                            snprintf(buf, sizeof(buf),
-                                "OpenCL ATI device #%u does not match any CAL device",
-                                device_index
-                            );
-                            gpu_warning(warnings, buf);
-                            goto leave; // Should never happen
-                        }
-                        if ((int)ati_gpus[current_CAL_index].attribs.target >= min_CAL_target) {
-                            break;  // We have a match
-                        }
-                        // This CAL GPU is not recognized by OpenCL,
-                        // so try the next
-                        //
-                        ++current_CAL_index;
-                    }
-                    opencl_prop.device_num = current_CAL_index++;
-
-                    // Always use GPU model name from CAL if
-                    // available for ATI / AMD  GPUs because
-                    // (we believe) it is more user-friendly.
-                    //
-                    safe_strcpy(opencl_prop.name,
-                        ati_gpus[opencl_prop.device_num].name
-                    );
-
-                    // Work around a bug in OpenCL which returns only
-                    // 1/2 of total global RAM size: use the value from CAL.
-                    // This bug applies only to ATI GPUs, not to NVIDIA
-                    // See also further workaround code for Macs.
-                    //
-                    opencl_prop.global_mem_size = ati_gpus[opencl_prop.device_num].attribs.localRAM * MEGA;
-                    opencl_prop.peak_flops = ati_gpus[opencl_prop.device_num].peak_flops;
-                } else {            // ! ati.have_cal
-                    opencl_prop.device_num = (int)(ati_opencls.size());
-                    // The OpenCL clock is often a DPM level, not the boost
-                    // clock.  Use the highest DPM level if it is higher.
-                    // This only applies when there is exactly one AMD GPU.
-                    //
-                    int dpm_clock = amd_max_dpm_clock_mhz(-1);
-                    if (dpm_clock > 0 && (cl_uint)dpm_clock > opencl_prop.max_clock_frequency) {
-                        opencl_prop.max_clock_frequency = (cl_uint)dpm_clock;
-                    }
-                    COPROC_ATI c;
-                    c.opencl_prop = opencl_prop;
-                    c.set_peak_flops();
-                    if (c.bad_gpu_peak_flops("AMD OpenCL", s)) {
-                        gpu_warning(warnings, s.c_str());
-                    }
-                    opencl_prop.peak_flops = c.peak_flops;
-                    opencl_prop.peak_flops_dp = c.peak_flops_dp;
-                    opencl_prop.have_fp64 = c.have_fp64;
-                }
-
-                // device_num is an ati_gpus index only when it came from
-                // CAL.  For HIP/OpenCL-only detection it indexes
-                // ati_opencls, so using it here could attribute another
-                // GPU's free RAM to this device.  Fall back to the
-                // OpenCL total instead.
+                opencl_prop.device_num = (int)(ati_opencls.size());
+                // The OpenCL clock is often a DPM level, not the boost
+                // clock.  Use the highest DPM level if it is higher.
+                // This only applies when there is exactly one AMD GPU.
                 //
-                if (ati.have_cal && opencl_prop.device_num >= 0
-                    && opencl_prop.device_num < (int)ati_gpus.size()
-                ) {
-                    opencl_prop.opencl_available_ram =
-                        ati_gpus[opencl_prop.device_num].available_ram;
-                } else {
-                    opencl_prop.opencl_available_ram = opencl_prop.global_mem_size;
+                int dpm_clock = amd_max_dpm_clock_mhz(-1);
+                if (dpm_clock > 0 && (cl_uint)dpm_clock > opencl_prop.max_clock_frequency) {
+                    opencl_prop.max_clock_frequency = (cl_uint)dpm_clock;
                 }
+                COPROC_ATI c;
+                c.opencl_prop = opencl_prop;
+                c.set_peak_flops();
+                if (c.bad_gpu_peak_flops("AMD OpenCL", s)) {
+                    gpu_warning(warnings, s.c_str());
+                }
+                opencl_prop.peak_flops = c.peak_flops;
+                opencl_prop.peak_flops_dp = c.peak_flops_dp;
+                opencl_prop.have_fp64 = c.have_fp64;
+
+                // device_num indexes ati_opencls here, not ati_gpus.
+                // Use the OpenCL total; free HIP RAM is not matched
+                // per-device once CAL is gone.
+                //
+                opencl_prop.opencl_available_ram = opencl_prop.global_mem_size;
                 ati_opencls.push_back(opencl_prop);
             } else if (is_intel(opencl_prop.vendor)) {
                 //////////// INTEL GPU //////////////
@@ -819,7 +720,7 @@ void COPROCS::get_opencl(
     // so we can't use have_nvidia() etc.
     //
     if ((nvidia_opencls.size() > 0) || nvidia.have_cuda) max_other_coprocs--;
-    if ((ati_opencls.size() > 0) || ati.have_cal) max_other_coprocs--;
+    if (ati_opencls.size() > 0) max_other_coprocs--;
     if (intel_gpu_opencls.size() > 0) max_other_coprocs--;
     if (apple_gpu_opencls.size() > 0) max_other_coprocs--;
     if ((int)other_opencls.size() > max_other_coprocs) {
@@ -868,9 +769,9 @@ void COPROCS::correlate_opencl(
     }
 
     if (ati_opencls.size() > 0) {
-        if (ati.have_cal || ati.have_hip) {
-            // CAL and HIP enumerate AMD GPUs in PCI order, the same order
-            // the AMD OpenCL runtime uses, so device numbers match.
+        if (ati.have_hip) {
+            // HIP enumerates AMD GPUs in the same order as the AMD OpenCL
+            // runtime, so device numbers match.
             ati.merge_opencl(ati_opencls, ignore_gpu_instance[PROC_TYPE_AMD_GPU]);
             if (ati.have_hip) {
                 if (!ati.gfxip_major) {
@@ -899,6 +800,68 @@ void COPROCS::correlate_opencl(
                 ati.gfxip_minor = ati.opencl_prop.gfxip_minor;
             }
             ati.set_peak_flops();
+
+            // As with HIP, include every OpenCL AMD device, not just the
+            // ones equivalent to the best.  Keep the aggregate fields
+            // conservative for old servers.
+            //
+            int n = 0;
+            bool all_fp64 = true, arch_common = true, first_used = true;
+            double min_dp = 0, min_ram = 0, max_peak = 0;
+            char common_arch[64];
+            common_arch[0] = 0;
+            for (unsigned int i=0; i<ati_opencls.size(); i++) {
+                OPENCL_DEVICE_PROP& o = ati_opencls[i];
+                if (in_vector(o.device_num, ignore_gpu_instance[PROC_TYPE_AMD_GPU])) {
+                    o.is_used = COPROC_IGNORED;
+                    continue;
+                }
+                if (n >= MAX_COPROC_INSTANCES) {
+                    o.is_used = COPROC_UNUSED;
+                    continue;
+                }
+                char arch[64];
+                arch[0] = 0;
+                int target = 0;
+                if (o.gfxip_major) {
+                    target = o.gfxip_major*10000 + o.gfxip_minor*100;
+                    gfx_target_to_string(target, arch, sizeof(arch));
+                }
+                ati.device_nums[n] = o.device_num;
+                ati.instance_has_opencl[n] = true;
+                ati.opencl_device_indexes[n] = o.opencl_device_index;
+                ati.opencl_device_ids[n] = o.device_id;
+                if (first_used) {
+                    safe_strcpy(common_arch, arch);
+                    min_dp = o.peak_flops_dp;
+                    min_ram = o.global_mem_size;
+                    max_peak = o.peak_flops;
+                    first_used = false;
+                } else {
+                    if (strcmp(common_arch, arch)) arch_common = false;
+                    if (o.peak_flops_dp < min_dp) min_dp = o.peak_flops_dp;
+                    if (o.global_mem_size < min_ram) min_ram = o.global_mem_size;
+                    if (o.peak_flops > max_peak) max_peak = o.peak_flops;
+                }
+                if (!(o.have_fp64 || (o.double_fp_config != 0))) {
+                    all_fp64 = false;
+                }
+                o.is_used = COPROC_USED;
+                n++;
+            }
+            if (n) {
+                ati.count = n;
+                ati.opencl_device_count = n;
+                ati.have_fp64 = all_fp64;
+                ati.peak_flops_dp = all_fp64? min_dp : 0;
+                if (!arch_common) ati.gcn_arch[0] = 0;
+                else safe_strcpy(ati.gcn_arch, common_arch);
+                ati.attribs.localRAM = (int)(min_ram/MEGA);
+                ati.available_ram = min_ram;
+                ati.opencl_prop.global_mem_size = min_ram;
+                ati.peak_flops = max_peak;
+                ati.have_opencl = true;
+            }
         }
     }
 

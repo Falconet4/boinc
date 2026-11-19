@@ -1070,6 +1070,28 @@ void COPROC_ATI::write_xml(MIOFILE& f, bool scheduler_rpc) {
         opencl_prop.write_xml(f, "coproc_opencl");
     }
 
+    for (unsigned int i=0; i<devices.size(); i++) {
+        const COPROC_ATI_DEVICE& d = devices[i];
+        f.printf(
+            "   <device>\n"
+            "      <name>%s</name>\n"
+            "      <gcn_arch>%s</gcn_arch>\n"
+            "      <gfx_target_version>%d</gfx_target_version>\n"
+            "      <device_num>%d</device_num>\n"
+            "      <hip_version>%d</hip_version>\n"
+            "      <have_hip>%d</have_hip>\n"
+            "      <have_fp64>%d</have_fp64>\n"
+            "      <peak_flops>%f</peak_flops>\n"
+            "      <peak_flops_dp>%f</peak_flops_dp>\n"
+            "      <total_ram>%f</total_ram>\n"
+            "   </device>\n",
+            d.name, d.gcn_arch, d.gfx_target_version, d.device_num,
+            d.hip_version, d.have_hip ? 1 : 0,
+            d.have_fp64 ? 1 : 0, d.peak_flops,
+            d.peak_flops_dp, d.total_ram
+        );
+    }
+
     f.printf("</coproc_ati>\n");
 }
 #endif
@@ -1099,6 +1121,7 @@ void COPROC_ATI::clear() {
     gfxip_major = 0;
     gfxip_minor = 0;
     safe_strcpy(gcn_arch, "");
+    devices.clear();
     is_used = COPROC_USED;
 }
 
@@ -1108,6 +1131,26 @@ int COPROC_ATI::parse(XML_PARSER& xp) {
     clear();
 
     while (!xp.get_tag()) {
+        if (xp.match_tag("device")) {
+            COPROC_ATI_DEVICE d;
+            while (!xp.get_tag()) {
+                if (xp.match_tag("/device")) break;
+                if (xp.parse_str("name", d.name, sizeof(d.name))) continue;
+                if (xp.parse_str("gcn_arch", d.gcn_arch, sizeof(d.gcn_arch))) continue;
+                if (xp.parse_int("gfx_target_version", d.gfx_target_version)) continue;
+                if (xp.parse_int("device_num", d.device_num)) continue;
+                if (xp.parse_int("hip_version", d.hip_version)) continue;
+                if (xp.parse_bool("have_hip", d.have_hip)) continue;
+                if (xp.parse_bool("have_fp64", d.have_fp64)) continue;
+                if (xp.parse_double("peak_flops", d.peak_flops)) continue;
+                if (xp.parse_double("peak_flops_dp", d.peak_flops_dp)) continue;
+                if (xp.parse_double("total_ram", d.total_ram)) continue;
+            }
+            if (devices.size() < MAX_COPROC_INSTANCES) {
+                devices.push_back(d);
+            }
+            continue;
+        }
         if (xp.match_tag("/coproc_ati")) {
             if (strlen(version)) {
                 int major, minor, release;
@@ -1229,6 +1272,58 @@ void format_hip_version(int v, char* buf, int buflen) {
         snprintf(buf, buflen, "%d.%d.%d", major, minor, patch);
     } else {
         snprintf(buf, buflen, "%d.%d", major, minor);
+    }
+}
+
+// Build the per-device report.  HIP is authoritative when present; an
+// OpenCL-only host falls back to the AMD OpenCL device list.  Every value
+// is total, not free: the report is for capabilities, not packing.
+//
+void COPROC_ATI::set_devices(
+    const std::vector<COPROC_ATI>& hip,
+    const std::vector<OPENCL_DEVICE_PROP>& ocl
+) {
+    devices.clear();
+    if (!hip.empty()) {
+        for (unsigned int i=0; i<hip.size(); i++) {
+            const COPROC_ATI& h = hip[i];
+            COPROC_ATI_DEVICE d;
+            safe_strcpy(d.name, h.name);
+            safe_strcpy(d.gcn_arch, h.gcn_arch);
+            if (!d.name[0]) {
+                safe_strcpy(d.name, h.gcn_arch);
+            }
+            d.gfx_target_version = h.gfx_target_version;
+            d.device_num = h.device_num;
+            d.hip_version = h.hip_version;
+            d.have_hip = h.have_hip;
+            d.have_fp64 = h.have_fp64;
+            d.peak_flops = h.peak_flops;
+            d.peak_flops_dp = h.peak_flops_dp;
+            d.total_ram = (double)h.attribs.localRAM * MEGA;
+            if (!d.total_ram) {
+                d.total_ram = h.opencl_prop.global_mem_size;
+            }
+            devices.push_back(d);
+        }
+        return;
+    }
+    for (unsigned int i=0; i<ocl.size(); i++) {
+        const OPENCL_DEVICE_PROP& o = ocl[i];
+        COPROC_ATI_DEVICE d;
+        safe_strcpy(d.name, o.name);
+        d.device_num = o.device_num;
+        d.have_fp64 = o.have_fp64 || (o.double_fp_config != 0);
+        d.peak_flops = o.peak_flops;
+        d.peak_flops_dp = o.peak_flops_dp;
+        d.total_ram = o.global_mem_size;
+        if (o.gfxip_major) {
+            d.gfx_target_version = o.gfxip_major*10000 + o.gfxip_minor*100;
+            gfx_target_to_string(
+                d.gfx_target_version, d.gcn_arch, sizeof(d.gcn_arch)
+            );
+        }
+        devices.push_back(d);
     }
 }
 

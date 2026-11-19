@@ -23,6 +23,13 @@
 #include <memory>
 #include <regex.h>
 
+#include "coproc.h"
+
+struct HOST_USAGE;
+struct SCHEDULER_REQUEST;
+struct WORKUNIT;
+struct XML_PARSER;
+
 // Owns a compiled POSIX regex.  PLAN_CLASS_SPEC is copied into a vector,
 // so the compiled regex lives in shared storage: copies share it and the
 // last one frees it.  Without this, every parsed plan class leaked its
@@ -40,6 +47,7 @@ public:
 
     PLAN_CLASS_REGEX() : state(std::make_shared<STATE>()) {}
     regex_t* get() { return &state->re; }
+    regex_t* get() const { return &state->re; }
     bool is_set() const { return state->compiled; }
 
     // Compile a pattern, releasing any previously compiled form first.
@@ -182,7 +190,7 @@ struct PLAN_CLASS_SPEC {
     //
     int min_vbox_version;
     int max_vbox_version;
-    vector<int> exclude_vbox_version;
+    std::vector<int> exclude_vbox_version;
     bool vm_accel_required;
 
     PLAN_CLASS_SPEC();
@@ -191,6 +199,105 @@ struct PLAN_CLASS_SPEC {
     bool check(SCHEDULER_REQUEST& sreq, HOST_USAGE& hu, const WORKUNIT* wu);
     bool check_wsl_gpu(SCHEDULER_REQUEST& sreq, std::string gpu_name);
 };
+
+// The subset of a plan class that applies to one physical AMD device.
+// Kept separate from PLAN_CLASS_SPEC so the matching rule can be inline and
+// unit-tested without the scheduler's globals.
+//
+struct AMD_DEVICE_REQUIREMENTS {
+    bool require_hip = false;
+    int min_hip_version = 0;
+    bool require_fp64 = false;
+    double min_gpu_dp_flops = 0;
+    double min_gpu_ram_mb = 0;
+    double min_gpu_peak_flops = 0;
+    double max_gpu_peak_flops = 0;
+    const PLAN_CLASS_REGEX* gcn_arch_regex = NULL;
+};
+
+inline bool amd_device_matches(
+    const AMD_DEVICE_REQUIREMENTS& req, const COPROC_ATI_DEVICE& dev,
+    double& gpu_ram, const char** why
+) {
+    if (why) *why = NULL;
+    if (req.gcn_arch_regex && req.gcn_arch_regex->is_set()) {
+        if (!dev.gcn_arch[0]
+            || regexec(req.gcn_arch_regex->get(), dev.gcn_arch, 0, NULL, 0)
+        ) {
+            if (why) *why = "gcn_arch does not match";
+            return false;
+        }
+    }
+    if (req.require_hip && !dev.have_hip) {
+        if (why) *why = "HIP not supported";
+        return false;
+    }
+    if (req.min_hip_version
+        && (!dev.have_hip || dev.hip_version < req.min_hip_version)
+    ) {
+        if (why) *why = "HIP version too low";
+        return false;
+    }
+    if (req.require_fp64 && !dev.have_fp64) {
+        if (why) *why = "FP64 not supported";
+        return false;
+    }
+    if (req.min_gpu_dp_flops > 0
+        && (!dev.have_fp64 || dev.peak_flops_dp < req.min_gpu_dp_flops)
+    ) {
+        if (why) *why = "FP64 peak too low";
+        return false;
+    }
+    if (req.min_gpu_ram_mb
+        && dev.total_ram < req.min_gpu_ram_mb * 1024. * 1024.
+    ) {
+        if (why) *why = "GPU RAM too small";
+        return false;
+    }
+    if (req.min_gpu_peak_flops
+        && dev.peak_flops < req.min_gpu_peak_flops
+    ) {
+        if (why) *why = "FP32 peak too low";
+        return false;
+    }
+    if (req.max_gpu_peak_flops
+        && dev.peak_flops > req.max_gpu_peak_flops
+    ) {
+        if (why) *why = "FP32 peak too high";
+        return false;
+    }
+    gpu_ram = dev.total_ram;
+    return true;
+}
+
+// Select the devices in cp that satisfy req.  Returns the number stored
+// (capped at max), the index of the fastest match in best, and the minimum
+// total RAM among matches.  Empty cp.devices returns 0.
+//
+inline int amd_matching_devices(
+    const AMD_DEVICE_REQUIREMENTS& req, const COPROC_ATI& cp,
+    int* nums, int max, int& best, double& min_ram
+) {
+    best = -1;
+    min_ram = 0;
+    int n = 0;
+    for (unsigned int i=0; i<cp.devices.size(); i++) {
+        const COPROC_ATI_DEVICE& d = cp.devices[i];
+        if (!device_num_allowed(cp.device_nums, cp.count, d.device_num)) {
+            continue;
+        }
+        double ram = 0;
+        if (!amd_device_matches(req, d, ram, NULL)) continue;
+        if (n < max) {
+            nums[n++] = d.device_num;
+        }
+        if (best < 0 || d.peak_flops > cp.devices[best].peak_flops) {
+            best = (int)i;
+        }
+        if (!min_ram || ram < min_ram) min_ram = ram;
+    }
+    return n;
+}
 
 struct PLAN_CLASS_SPECS {
     std::vector<PLAN_CLASS_SPEC> classes;
