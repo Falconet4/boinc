@@ -279,7 +279,9 @@ int parse_command_line(char* p, char** argv, int max_args) {
     int argc=0;
 
     // argv must have room for max_args entries, including the terminating NULL.
-    // Return an error rather than overrunning the caller's array.
+    // Return an error rather than overrunning the caller's array.  The array
+    // is still NULL-terminated on that path, so a caller that ignores the
+    // return value cannot walk into stale pointers.
     //
     if (max_args < 1) return -1;
 
@@ -289,18 +291,18 @@ int parse_command_line(char* p, char** argv, int max_args) {
             if (isspace(*p)) {
             } else if (*p == '\'') {
                 p++;
-                if (argc >= max_args-1) return -1;
+                if (argc >= max_args-1) { argv[argc] = 0; return -1; }
                 argv[argc++] = p;
                 state = IN_SINGLE_QUOTED_TOKEN;
                 break;
             } else if (*p == '\"') {
                 p++;
-                if (argc >= max_args-1) return -1;
+                if (argc >= max_args-1) { argv[argc] = 0; return -1; }
                 argv[argc++] = p;
                 state = IN_DOUBLE_QUOTED_TOKEN;
                 break;
             } else {
-                if (argc >= max_args-1) return -1;
+                if (argc >= max_args-1) { argv[argc] = 0; return -1; }
                 argv[argc++] = p;
                 state = IN_UNQUOTED_TOKEN;
             }
