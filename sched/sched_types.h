@@ -517,13 +517,57 @@ struct WORK_REQ : public WORK_REQ_BASE {
     PROJECT_PREFS project_prefs;
     std::vector<USER_MESSAGE> no_work_messages;
     std::vector<BEST_APP_VERSION*> best_app_versions;
+        // memoized per app; owned by this request
+    std::vector<BEST_APP_VERSION*> retired_best_app_versions;
+        // entries removed from best_app_versions during scheduling.
+        // They cannot be freed at that point: a pointer to one may
+        // already have been stored in an APP_VERSION in the reply, and
+        // the reply is serialized after scheduling.  Hold them until the
+        // request is torn down.
     std::vector<DB_HOST_APP_VERSION> host_app_versions;
     std::vector<DB_HOST_APP_VERSION> host_app_versions_orig;
 
     void get_job_limits();
     void add_no_work_message(const char*);
 
-    ~WORK_REQ() {}
+    // Move the memoized entries aside without freeing them.  Used by the
+    // scheduling scans, which drop the memo array between passes but may
+    // already have stored a pointer in the reply being built.
+    //
+    void retire_best_app_versions() {
+        for (BEST_APP_VERSION* bavp: best_app_versions) {
+            retired_best_app_versions.push_back(bavp);
+        }
+        best_app_versions.clear();
+    }
+
+    // Free every BEST_APP_VERSION created by get_app_version() for this
+    // request.  Only safe once the reply has been written (or before any
+    // has been created); clear() and the destructor meet that requirement.
+    //
+    void release_best_app_versions() {
+        for (BEST_APP_VERSION* bavp: best_app_versions) {
+            delete bavp;
+        }
+        best_app_versions.clear();
+        for (BEST_APP_VERSION* bavp: retired_best_app_versions) {
+            delete bavp;
+        }
+        retired_best_app_versions.clear();
+    }
+
+    void clear() {
+        WORK_REQ_BASE::clear();
+        project_prefs = PROJECT_PREFS();
+        no_work_messages.clear();
+        release_best_app_versions();
+        host_app_versions.clear();
+        host_app_versions_orig.clear();
+    }
+
+    ~WORK_REQ() {
+        release_best_app_versions();
+    }
 };
 
 // NOTE: if any field requires initialization,
