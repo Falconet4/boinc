@@ -867,6 +867,299 @@ bool is_valid_filename(const char* name) {
     return true;
 }
 
+// Escape text for inclusion in HTML (element content or a quoted attribute).
+//
+std::string html_escape(const std::string& in) {
+    std::string out;
+    out.reserve(in.size());
+    for (char c: in) {
+        switch (c) {
+        case '&': out += "&amp;"; break;
+        case '<': out += "&lt;"; break;
+        case '>': out += "&gt;"; break;
+        case '"': out += "&quot;"; break;
+        case '\'': out += "&#39;"; break;
+        default: out += c;
+        }
+    }
+    return out;
+}
+
+// Is this URL safe to put in an href/src attribute?
+// Allow http, https and scheme-relative/relative references; reject
+// javascript:, data:, vbscript: and anything with a colon before any slash
+// that is not one of the allowed schemes.
+//
+static bool url_is_safe(const std::string& u) {
+    size_t i = 0;
+    while (i < u.size() && isspace((unsigned char)u[i])) i++;
+    if (i >= u.size()) return false;
+    // find scheme end
+    size_t colon = std::string::npos;
+    for (size_t j = i; j < u.size(); j++) {
+        char c = u[j];
+        if (c == ':') { colon = j; break; }
+        if (c == '/' || c == '?' || c == '#') break;
+        if (!(isalnum((unsigned char)c) || c == '+' || c == '-' || c == '.')) {
+            return false;
+        }
+    }
+    if (colon == std::string::npos) return true;   // relative, no scheme
+    std::string scheme = u.substr(i, colon-i);
+    for (char& c: scheme) c = (char)tolower((unsigned char)c);
+    return scheme == "http" || scheme == "https";
+}
+
+// Which attributes may survive on a given tag.  Presentational attributes only:
+// nothing that can run code (on*), load a stylesheet (style), or be used as a
+// script target (id, name).  <a href> and <img src> are allowed here and then
+// additionally URL-checked by the caller.
+//
+static bool attr_allowed(const std::string& tag, const std::string& a) {
+    if (a == "href") return tag == "a";
+    if (a == "src") return tag == "img";
+    if (a == "alt" || a == "title" || a == "width" || a == "height") return true;
+    if (a == "align" || a == "valign" || a == "border" || a == "cellpadding"
+        || a == "cellspacing" || a == "colspan" || a == "rowspan"
+        || a == "size" || a == "color" || a == "face" || a == "bgcolor"
+    ) {
+        return true;
+    }
+    return false;
+}
+
+static bool html_tag_allowed(const std::string& t) {
+    static const char* allowed[] = {
+        "a","b","i","u","em","strong","p","br","span","div","font",
+        "ul","ol","li","h1","h2","h3","h4","h5","h6","pre","code",
+        "blockquote","hr","sub","sup","img","small","big","center",
+        nullptr
+    };
+    for (int i=0; allowed[i]; i++) {
+        if (t == allowed[i]) return true;
+    }
+    return false;
+}
+
+// Decode the character references that can appear in an attribute value.
+//
+// The references html_escape_attr() emits are the only ones that must
+// round-trip, but a project may also send entities, and decoding those first
+// is what makes the sanitiser idempotent and lets url_is_safe() see the real
+// scheme.  A reference that is not valid here is left as written rather than
+// guessed at.
+//
+static std::string html_unescape_attr(const std::string& in) {
+    std::string out;
+    out.reserve(in.size());
+    size_t i = 0;
+    while (i < in.size()) {
+        if (in[i] != '&') { out += in[i++]; continue; }
+        if (!in.compare(i, 4, "&lt;"))   { out += '<';  i += 4; continue; }
+        if (!in.compare(i, 4, "&gt;"))   { out += '>';  i += 4; continue; }
+        if (!in.compare(i, 5, "&amp;"))  { out += '&';  i += 5; continue; }
+        if (!in.compare(i, 6, "&quot;")) { out += '"';  i += 6; continue; }
+        if (!in.compare(i, 5, "&#39;"))  { out += '\''; i += 5; continue; }
+        if (!in.compare(i, 6, "&apos;")) { out += '\''; i += 6; continue; }
+        if (in[i+1] == '#') {
+            // at most 4 digits, then ';'
+            size_t d = i+2;
+            size_t nd = 0;
+            unsigned long v = 0;
+            while (d+nd < in.size() && nd < 4
+                && isdigit((unsigned char)in[d+nd])
+            ) {
+                v = v*10 + (unsigned long)(in[d+nd]-'0');
+                nd++;
+            }
+            if (nd && d+nd < in.size() && in[d+nd] == ';' && v < 128) {
+                out += (char)v;
+                i = d+nd+1;
+                continue;
+            }
+        }
+        out += in[i++];
+    }
+    return out;
+}
+
+// Escape a value for a double-quoted attribute, dropping the control bytes
+// that decoding a character reference can produce.
+//
+static std::string html_escape_attr(const std::string& in) {
+    std::string out;
+    out.reserve(in.size());
+    for (char c: in) {
+        unsigned char u = (unsigned char)c;
+        switch (c) {
+        case '&':  out += "&amp;";  break;
+        case '<':  out += "&lt;";   break;
+        case '>':  out += "&gt;";   break;
+        case '"':  out += "&quot;"; break;
+        default:
+            // Tab, LF and CR are allowed in XML attribute values; other
+            // control characters are dropped, since they can only have come
+            // from a decoded reference.
+            //
+            if (u < 0x20 && c != '\t' && c != '\n' && c != '\r') break;
+            out += c;
+          }
+    }
+    return out;
+}
+
+// Strip the HTML that can execute, keeping simple formatting.
+//
+// Notices come from a project's RSS feed and are rendered in the manager's
+// web view, so they are untrusted.  Escape-everything would break the ones
+// that legitimately contain markup, so instead: keep a whitelist of inline
+// formatting tags, drop every other tag, keep only href on <a> and src on
+// <img>, and require those to be http/https/relative.  Event handlers are
+// dropped by construction because no other attribute survives.
+//
+std::string html_sanitize(const std::string& in) {
+    std::string out;
+    size_t i = 0;
+    const size_t n = in.size();
+    while (i < n) {
+        if (in[i] != '<') {
+            // A bare '>' in text is harmless without a '<', but escape it
+            // anyway so the output is unambiguous.
+            if (in[i] == '>') out += "&gt;";
+            else out += in[i];
+            i++;
+            continue;
+        }
+        // Try to read a tag: "<" ["/"] name [attrs] [">" | "/>"].  A '>'
+        // inside a quoted attribute value does not end the tag.
+        size_t j = i + 1;
+        bool closing = false;
+        if (j < n && in[j] == '/') { closing = true; j++; }
+        size_t name_start = j;
+        while (j < n && (isalnum((unsigned char)in[j]) || in[j] == '-')) j++;
+        if (j == name_start) {
+            // not a tag (a stray '<', a comment, a doctype): escape it
+            out += "&lt;";
+            i++;
+            continue;
+        }
+        std::string name = in.substr(name_start, j-name_start);
+        for (char& c: name) c = (char)tolower((unsigned char)c);
+
+        // scan the rest of the tag, honouring quotes
+        size_t k = j;
+        char quote = 0;
+        bool closed = false;
+        for (; k < n; k++) {
+            char c = in[k];
+            if (quote) {
+                if (c == quote) quote = 0;
+            } else if (c == '"' || c == '\'') {
+                quote = c;
+            } else if (c == '>') {
+                closed = true;
+                break;
+            }
+        }
+        if (!closed) {
+            // unterminated tag: escape the '<' and carry on
+            out += "&lt;";
+            i++;
+            continue;
+        }
+        std::string attrs = in.substr(j, k-j);
+
+        if (!html_tag_allowed(name)) {
+            // Drop the tag.  For a few containers also drop the content,
+            // otherwise their text would leak through as page text.
+            if (!closing && (name == "script" || name == "style")) {
+                std::string end = "</" + name;
+                size_t p = k;
+                while (p < n) {
+                    bool match = (in[p] == '<' && (n-p) >= end.size());
+                    for (size_t q=0; match && q<end.size(); q++) {
+                        if (tolower((unsigned char)in[p+q])
+                            != (unsigned char)end[q]
+                        ) {
+                            match = false;
+                        }
+                    }
+                    if (match) {
+                        size_t e = in.find('>', p);
+                        p = (e == std::string::npos) ? n : e+1;
+                        break;
+                    }
+                    p++;
+                }
+                i = p;
+                continue;
+            }
+            i = k+1;
+            continue;
+        }
+
+        if (closing) {
+            out += "</" + name + ">";
+            i = k+1;
+            continue;
+        }
+
+        // Rebuild the opening tag, keeping only attributes from the tag's
+        // allowlist.  Anything not listed - every on* handler, style, class,
+        // id, target - is dropped, so the result cannot carry code.  <a>/<img>
+        // additionally have their URL attribute checked by url_is_safe().
+        //
+        out += "<" + name;
+        {
+            size_t p = 0;
+            while (p < attrs.size()) {
+                while (p < attrs.size() && isspace((unsigned char)attrs[p])) p++;
+                size_t an = p;
+                while (p < attrs.size()
+                    && (isalnum((unsigned char)attrs[p]) || attrs[p] == '-')
+                ) p++;
+                if (p == an) { p++; continue; }
+                std::string aname = attrs.substr(an, p-an);
+                for (char& c: aname) c = (char)tolower((unsigned char)c);
+                while (p < attrs.size() && isspace((unsigned char)attrs[p])) p++;
+                std::string aval;
+                if (p < attrs.size() && attrs[p] == '=') {
+                    p++;
+                    while (p < attrs.size() && isspace((unsigned char)attrs[p])) p++;
+                    if (p < attrs.size() && (attrs[p] == '"' || attrs[p] == '\'')) {
+                        char q = attrs[p++];
+                        size_t vs = p;
+                        while (p < attrs.size() && attrs[p] != q) p++;
+                        aval = attrs.substr(vs, p-vs);
+                        if (p < attrs.size()) p++;
+                    } else {
+                        size_t vs = p;
+                        while (p < attrs.size() && !isspace((unsigned char)attrs[p])) p++;
+                        aval = attrs.substr(vs, p-vs);
+                    }
+                }
+                if (attr_allowed(name, aname)) {
+                    // Attribute values arrive entity-encoded.  Decode them
+                    // first, so the URL check sees the real scheme (an
+                    // encoded "javascript&#58;" must not slip through) and
+                    // so re-escaping below reproduces the input rather than
+                    // double-escaping it on every pass.
+                    //
+                    std::string v = html_unescape_attr(aval);
+                    bool is_url = (name == "a" && aname == "href")
+                        || (name == "img" && aname == "src");
+                    if (!is_url || url_is_safe(v)) {
+                        out += " " + aname + "=\"" + html_escape_attr(v) + "\"";
+                    }
+                }
+            }
+        }
+        out += ">";
+        i = k+1;
+    }
+    return out;
+}
+
 // get the name part of a filepath
 // returns:
 //   0 on success

@@ -29,6 +29,7 @@
 #include "SkinManager.h"
 #include "MainDocument.h"
 #include "NoticeListCtrl.h"
+#include "str_util.h"
 
 IMPLEMENT_DYNAMIC_CLASS( CNoticeListCtrl, wxWindow )
 
@@ -143,11 +144,19 @@ void CNoticeListCtrl::SetItemCount(int newCount) {
 
             strCategory = wxString(np->category, wxConvUTF8);
 
-            strProjectName = wxString(np->project_name, wxConvUTF8);
+            // project_name and title are project-controlled and end up inside
+            // HTML below.  Escape them here, before the localize markers are
+            // assembled, so the escaping does not touch "_("...")".
+            //
+            strProjectName = wxString(
+                html_escape(np->project_name).c_str(), wxConvUTF8
+            );
 
             strURL = wxString(np->link, wxConvUTF8);
 
-            strTitle = wxString(np->title, wxConvUTF8);
+            strTitle = wxString(
+                html_escape(np->title).c_str(), wxConvUTF8
+            );
 
             // Fix-up title
             if (strCategory == wxT("client")) {
@@ -174,10 +183,23 @@ void CNoticeListCtrl::SetItemCount(int newCount) {
             eol_to_br(strTitle);
             localize(strTitle);
 
+            // Descriptions are meant to contain HTML, so they are sanitised
+            // rather than escaped: localize first (it rewrites _("...")"),
+            // then eol_to_br (which inserts <br>), then drop everything that
+            // can execute.
+            //
             strDescription = wxString(np->description.c_str(), wxConvUTF8);
-            eol_to_br(strDescription);
             localize(strDescription);
+            eol_to_br(strDescription);
+            strDescription = wxString(
+                html_sanitize(std::string(strDescription.utf8_str())).c_str(),
+                wxConvUTF8
+            );
 
+            // NOTE: the protocol-relative rewrite below now happens after the
+            // sanitise call; //host/path has no scheme and is accepted by the
+            // sanitiser as a relative URL, so the rewrite still applies.
+            //
             // RSS feeds and web pages may use protocol-relative (scheme-relative)
             // URLs, such as <img src="//sample.com/test.jpg"/>
             // Since the html comes from a web server via http, the scheme is
@@ -189,14 +211,11 @@ void CNoticeListCtrl::SetItemCount(int newCount) {
             // of this automatically, but fails to do so under Windows, so we do
             // it here explicitly.
             strDescription.Replace(wxT("\"//"), wxT("\"http://"));
-			strDescription.Replace(wxT("</a>"), wxT("</a> "));
+            strDescription.Replace(wxT("</a>"), wxT("</a> "));
 
-            // Apparently attempting to follow links with other targets specified
-            // fails to fire our event handler.  For now we will just strip out
-            // the special _blank/_new target which is supposed to open a new
-            // browser window anyways.
-            strDescription.Replace(wxT("target=\"_blank\""), wxT(""));
-            strDescription.Replace(wxT("target=\"_new\""), wxT(""));
+            // The target=_blank/_new strip that used to be here is no longer
+            // needed: html_sanitize() keeps only href on <a> (and src on
+            // <img>), so a target attribute cannot survive.
 
             dtBuffer.Set((time_t)np->create_time);
             strCreateTime = dtBuffer.Format();
@@ -226,8 +245,8 @@ void CNoticeListCtrl::SetItemCount(int newCount) {
 
             if (!strURL.IsEmpty()) {
                 strTemp.Printf(
-                    wxT(" &middot; <a href=%s>%s</a> "),
-                    strURL.c_str(),
+                    wxT(" &middot; <a href=\"%s\">%s</a> "),
+                    html_escape(std::string(strURL.utf8_str())).c_str(),
                     _("more info...")
                 );
                 strBuffer += strTemp;

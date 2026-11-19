@@ -263,6 +263,104 @@ namespace test_str_util {
         EXPECT_STREQ(buf, "23610321191510");
     }
 
+// html_escape() must neutralise every character that can change markup.
+//
+TEST_F(test_str_util, html_escape) {
+    EXPECT_EQ(html_escape(""), "");
+    EXPECT_EQ(html_escape("abc"), "abc");
+    EXPECT_EQ(html_escape("<b>"), "&lt;b&gt;");
+    EXPECT_EQ(html_escape("a&b"), "a&amp;b");
+    EXPECT_EQ(html_escape("\"x\""), "&quot;x&quot;");
+    EXPECT_EQ(html_escape("'x'"), "&#39;x&#39;");
+    EXPECT_EQ(html_escape("<script>"), "&lt;script&gt;");
+}
+
+// html_sanitize() keeps formatting but drops anything executable.
+//
+TEST_F(test_str_util, html_sanitize) {
+    // formatting survives
+    EXPECT_EQ(html_sanitize("<b>bold</b>"), "<b>bold</b>");
+    EXPECT_EQ(html_sanitize("<p>a<br>b</p>"), "<p>a<br>b</p>");
+
+    // script and style are dropped with their content
+    EXPECT_EQ(html_sanitize("<script>alert(1)</script>hi"), "hi");
+    EXPECT_EQ(html_sanitize("<SCRIPT>x()</SCRIPT>"), "");
+    EXPECT_EQ(html_sanitize("<style>a{}</style>ok"), "ok");
+
+    // event handlers cannot survive, on any tag
+    EXPECT_EQ(html_sanitize("<img src=x onerror=alert(1)>"), "<img src=\"x\">");
+    EXPECT_EQ(html_sanitize("<div onclick=\"x()\">d</div>"), "<div>d</div>");
+    EXPECT_EQ(html_sanitize("<svg/onload=alert(1)>"), "");
+
+    // only http/https/relative URLs are kept
+    EXPECT_EQ(html_sanitize("<a href=\"https://x/\">t</a>"),
+        "<a href=\"https://x/\">t</a>");
+    EXPECT_EQ(html_sanitize("<a href=\"javascript:alert(1)\">t</a>"), "<a>t</a>");
+    EXPECT_EQ(html_sanitize("<img src=\"data:text/html,x\">"), "<img>");
+    EXPECT_EQ(html_sanitize("<a href=\"//host/p\">t</a>"),
+        "<a href=\"//host/p\">t</a>");
+
+    // target is dropped, but presentational attributes survive
+    EXPECT_EQ(html_sanitize("<a href=\"http://x\" target=_blank>t</a>"),
+        "<a href=\"http://x\">t</a>");
+    EXPECT_EQ(html_sanitize("<font color=red size=2>t</font>"),
+        "<font color=\"red\" size=\"2\">t</font>");
+    // a table cell is not in the tag whitelist (the manager already wraps a
+    // notice in its own table), so it is dropped; its text is not
+    EXPECT_EQ(html_sanitize("<td colspan=2 align=center>c</td>"), "c");
+    EXPECT_EQ(html_sanitize("<img src=\"http://x/i.png\" alt=\"pic\">"),
+        "<img src=\"http://x/i.png\" alt=\"pic\">");
+
+    // style, id and class are never kept
+    EXPECT_EQ(html_sanitize("<p class=\"c\" id=\"i\">p</p>"), "<p>p</p>");
+    EXPECT_EQ(html_sanitize("<div style=\"x\">d</div>"), "<div>d</div>");
+
+    // stray angle brackets become text
+    EXPECT_EQ(html_sanitize("3 < 4 > 2"), "3 &lt; 4 &gt; 2");
+}
+
+// Attribute values arrive entity-encoded.  Decoding them before the URL
+// check and before re-escaping keeps the sanitiser idempotent; escaping the
+// raw text instead doubled "&amp;" on every pass.
+//
+TEST_F(test_str_util, html_sanitize_idempotent) {
+    const char* inputs[] = {
+        "<img alt=\"a&lt;b\">",
+        "<a href=\"http://x/a?p=1&amp;q=2\">t</a>",
+        "<a href=\"http://x/a?p=1&q=2\">t</a>",
+        "<font color=\"r&amp;d\">x</font>",
+        "<b>plain</b>",
+        "<a href=\"http://x/\" title=\"a&quot;b\">t</a>",
+        "text with &amp; and &lt;",
+    };
+    for (const char* in: inputs) {
+        std::string once = html_sanitize(in);
+        std::string twice = html_sanitize(once);
+        EXPECT_EQ(once, twice) << "for [" << in << "]";
+    }
+}
+
+// An entity-encoded scheme must not slip past the URL check: the check has
+// to run on the decoded value.
+//
+TEST_F(test_str_util, html_sanitize_decodes_before_url_check) {
+    EXPECT_EQ(html_sanitize("<a href=\"javascript&#58;alert(1)\">t</a>"),
+        "<a>t</a>");
+    EXPECT_EQ(html_sanitize("<a href=\"&#106;avascript:alert(1)\">t</a>"),
+        "<a>t</a>");
+    EXPECT_EQ(html_sanitize("<a href=\"java&#09;script:alert(1)\">t</a>"),
+        "<a>t</a>");
+    EXPECT_EQ(html_sanitize("<img src=\"&#100;ata:text/html,x\">"), "<img>");
+
+    // a decoded control character is dropped rather than written raw
+    EXPECT_EQ(html_sanitize("<a href=\"&#0;javascript:alert(1)\">t</a>"),
+        "<a>t</a>");
+
+    // a legitimate query string survives, decoded then re-escaped once
+    EXPECT_EQ(html_sanitize("<a href=\"http://x?a=1&amp;b=2\">t</a>"),
+        "<a href=\"http://x?a=1&amp;b=2\">t</a>");
+}
+
     TEST_F(test_str_util, string_substitute) {
         std::string tmp = "The quick brown fox jumps over the lazy dog";
         char buf[256];

@@ -113,4 +113,9 @@ extern bool is_valid_filename(const char*);
 
 extern int path_to_filename(std::string fpath, std::string& fname);
 extern int path_to_filename(std::string fpath, char* &fname);
+extern std::string html_escape(const std::string&);
+    // escape &, <, >, " and ' for HTML text or a quoted attribute
+extern std::string html_sanitize(const std::string&);
+    // keep simple formatting tags, drop everything that can execute
+
 #endif
