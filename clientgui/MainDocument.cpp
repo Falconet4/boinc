@@ -476,22 +476,37 @@ int CMainDocument::OnExit() {
         m_pClientManager = NULL;
     }
 
+    bool rpc_thread_gone = true;
     if (m_RPCThread) {
         KillRPCThread();
+        // KillRPCThread() returns when the thread sets m_RPCThread to
+        // NULL, or after a timeout.  wxThread::Kill() is a no-op on
+        // Unix/macOS, so the thread may still be running.
+        //
+        rpc_thread_gone = (m_RPCThread == NULL);
         m_RPCThread = NULL;
     }
 
-    delete m_pRPC_Thread_Mutex;
-    m_pRPC_Thread_Mutex = NULL;
+    if (rpc_thread_gone) {
+        delete m_pRPC_Thread_Mutex;
+        m_pRPC_Thread_Mutex = NULL;
 
-    delete m_pRPC_Thread_Condition;
-    m_pRPC_Thread_Condition = NULL;
+        delete m_pRPC_Thread_Condition;
+        m_pRPC_Thread_Condition = NULL;
 
-    delete m_pRPC_Request_Mutex;
-    m_pRPC_Request_Mutex = NULL;
+        delete m_pRPC_Request_Mutex;
+        m_pRPC_Request_Mutex = NULL;
 
-    delete m_pRPC_Request_Condition;
-    m_pRPC_Request_Condition = NULL;
+        delete m_pRPC_Request_Condition;
+        m_pRPC_Request_Condition = NULL;
+    } else {
+        // The process is exiting; leaking these is safer than freeing
+        // objects the RPC thread may still wait on.
+        //
+        wxLogTrace(wxT("Function Status"),
+            wxT("CMainDocument::OnExit: RPC thread did not exit; leaking sync objects")
+        );
+    }
 
     rpcClient.close();
 

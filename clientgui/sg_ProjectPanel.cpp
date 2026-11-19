@@ -481,7 +481,7 @@ wxBitmap* CSimpleProjectPanel::GetProjectSpecificBitmap(char* project_url) {
             // Our "project icon" bitmaps should all be 40 X 40
             wxImage img = wxImage(strIconPath, wxBITMAP_TYPE_ANY);
             if (img.IsOk()) {
-                if ((img.GetHeight() != 40) || (img.GetWidth() == 40)) {
+                if ((img.GetHeight() != 40) || (img.GetWidth() != 40)) {
                     img.Rescale(40, 40, wxIMAGE_QUALITY_BILINEAR);
                 }
                 wxBitmap* projectBM = new wxBitmap(img);

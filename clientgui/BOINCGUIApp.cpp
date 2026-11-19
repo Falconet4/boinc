@@ -294,7 +294,7 @@ bool CBOINCGUIApp::OnInit() {
         if (!success) {
             if (!g_use_sandbox) {
                 if (!wxDirExists(GetDataDirectory())) {
-                    success = wxMkdir(GetDataDirectory(), 0777);    // Does nothing if dir exists
+                    success = wxMkdir(GetDataDirectory(), 0700);    // Does nothing if dir exists
                 }
             }
         }

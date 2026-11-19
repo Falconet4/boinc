@@ -193,6 +193,7 @@ public:
     wxDialog*                   GetRPCWaitDialog() { return m_RPCWaitDlg; }
 //    void                      TestAsyncRPC();      // For testing Async RPCs
     RPCThread*                  m_RPCThread = nullptr;
+    int                         m_iLastCompletedRPCResult = -1;
     bool                        m_bRPCThreadIsReady = false;
     bool                        m_bShutDownRPCThread = false;
 
