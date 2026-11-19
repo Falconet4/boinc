@@ -45,6 +45,7 @@ set(LIBBOINC_HEADERS_GENERIC
     lib/diagnostics.h
     lib/error_numbers.h
     lib/filesys.h
+    lib/hip_boinc.h
     lib/hostinfo.h
     lib/keyword.h
     lib/md5.h

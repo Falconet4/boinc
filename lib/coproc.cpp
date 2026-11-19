@@ -149,6 +149,8 @@ int COPROC::parse(XML_PARSER& xp) {
         if (xp.parse_double("req_secs", req_secs)) continue;
         if (xp.parse_double("req_instances", req_instances)) continue;
         if (xp.parse_double("peak_flops", peak_flops)) continue;
+        if (xp.parse_double("peak_flops_dp", peak_flops_dp)) continue;
+        if (xp.parse_bool("have_fp64", have_fp64)) continue;
         if (xp.parse_str("device_nums", buf, sizeof(buf))) {
             int i=0;
             char* p = strtok(buf, " ");
@@ -415,6 +417,8 @@ void COPROC_NVIDIA::write_xml(MIOFILE& f, bool scheduler_rpc) {
     }
     f.printf(
         "   <peak_flops>%f</peak_flops>\n"
+        "   <peak_flops_dp>%f</peak_flops_dp>\n"
+        "   <have_fp64>%d</have_fp64>\n"
         "   <cudaVersion>%d</cudaVersion>\n"
         "   <drvVersion>%d</drvVersion>\n"
         "   <totalGlobalMem>%f</totalGlobalMem>\n"
@@ -433,6 +437,8 @@ void COPROC_NVIDIA::write_xml(MIOFILE& f, bool scheduler_rpc) {
         "   <deviceOverlap>%d</deviceOverlap>\n"
         "   <multiProcessorCount>%d</multiProcessorCount>\n",
         peak_flops,
+        peak_flops_dp,
+        have_fp64 ? 1 : 0,
         cuda_version,
         display_driver_version,
         cuda_prop.totalGlobalMem,
@@ -515,6 +521,8 @@ int COPROC_NVIDIA::parse(XML_PARSER& xp) {
         }
         if (xp.parse_int("count", count)) continue;
         if (xp.parse_double("peak_flops", peak_flops)) continue;
+        if (xp.parse_double("peak_flops_dp", peak_flops_dp)) continue;
+        if (xp.parse_bool("have_fp64", have_fp64)) continue;
         if (xp.parse_bool("have_cuda", have_cuda)) continue;
         if (xp.parse_bool("have_opencl", have_opencl)) continue;
         if (xp.parse_double("available_ram", available_ram)) continue;
@@ -581,6 +589,35 @@ int COPROC_NVIDIA::parse(XML_PARSER& xp) {
         }
     }
     return ERR_XML_PARSE;
+}
+
+// Estimated ratio of double- to single-precision peak throughput.
+// No API reports this directly, and it is an architectural property.
+// These are conservative values for the families BOINC is likely to
+// meet; returning 0 means "unknown" and reports no FP64 figure.
+//
+static double amd_fp64_ratio(int gfxip_major, const char* name) {
+    if (gfxip_major >= 11) return 1./32.;   // RDNA 3/4
+    if (gfxip_major == 10) return 1./16.;   // RDNA 1/2
+    if (gfxip_major == 9) {
+        if (strstr(name, "Instinct") || strstr(name, "MI")) return 1./2.;
+        if (strstr(name, "Radeon VII")) return 1./4.;
+        return 1./16.;                      // Vega consumer
+    }
+    if (gfxip_major == 8) return 1./16.;    // Polaris/Fiji
+    return 0.;
+}
+
+static double nvidia_fp64_ratio(int major, int minor) {
+    switch (major) {
+    case 12: return 1./64.;                 // Blackwell GeForce
+    case 10: return 1./2.;                  // Blackwell datacenter
+    case 9:  return 1./2.;                  // Hopper
+    case 8:  return (minor == 0) ? 1./2. : 1./64.;
+    case 7:  return (minor == 0) ? 1./2. : 1./32.;
+    case 6:  return (minor == 2) ? 1./2. : 1./32.;
+    default: return 0.;
+    }
 }
 
 void COPROC_NVIDIA::set_peak_flops() {
@@ -680,6 +717,20 @@ void COPROC_NVIDIA::set_peak_flops() {
         x = opencl_prop.max_compute_units * 48 * 2 * opencl_prop.max_clock_frequency * 1e6;
     }
     peak_flops = x;
+
+    peak_flops_dp = 0;
+    have_fp64 = false;
+    int dp_major = cuda_prop.major;
+    int dp_minor = cuda_prop.minor;
+    if (opencl_prop.nv_compute_capability_major) {
+        dp_major = opencl_prop.nv_compute_capability_major;
+        dp_minor = opencl_prop.nv_compute_capability_minor;
+    }
+    double ratio = nvidia_fp64_ratio(dp_major, dp_minor);
+    if (ratio > 0 && x > 0) {
+        peak_flops_dp = x * ratio;
+        have_fp64 = true;
+    }
 }
 
 // fake a NVIDIA GPU (for debugging)
@@ -733,18 +784,36 @@ void COPROC_ATI::write_xml(MIOFILE& f, bool scheduler_rpc) {
         "   <name>%s</name>\n"
         "   <available_ram>%f</available_ram>\n"
         "   <have_cal>%d</have_cal>\n"
-        "   <have_opencl>%d</have_opencl>\n",
+        "   <have_opencl>%d</have_opencl>\n"
+        "   <have_hip>%d</have_hip>\n"
+        "   <hip_version>%d</hip_version>\n"
+        "   <hip_device_num>%d</hip_device_num>\n"
+        "   <hip_cu_count>%d</hip_cu_count>\n"
+        "   <hip_lane_count>%d</hip_lane_count>\n"
+        "   <hip_clock_khz>%d</hip_clock_khz>\n"
+        "   <gfx_target_version>%d</gfx_target_version>\n"
+        "   <gcn_arch>%s</gcn_arch>\n",
         count,
         name,
         available_ram,
         have_cal ? 1 : 0,
-        have_opencl ? 1 : 0
+        have_opencl ? 1 : 0,
+        have_hip ? 1 : 0,
+        hip_version,
+        hip_device_num,
+        hip_cu_count,
+        hip_lane_count,
+        hip_clock_khz,
+        gfx_target_version,
+        gcn_arch
     );
     if (scheduler_rpc) {
         write_request(f);
     }
     f.printf(
         "   <peak_flops>%f</peak_flops>\n"
+        "   <peak_flops_dp>%f</peak_flops_dp>\n"
+        "   <have_fp64>%d</have_fp64>\n"
         "   <CALVersion>%s</CALVersion>\n"
         "   <target>%d</target>\n"
         "   <localRAM>%d</localRAM>\n"
@@ -761,6 +830,8 @@ void COPROC_ATI::write_xml(MIOFILE& f, bool scheduler_rpc) {
         "   <maxResource2DWidth>%d</maxResource2DWidth>\n"
         "   <maxResource2DHeight>%d</maxResource2DHeight>\n",
         peak_flops,
+        peak_flops_dp,
+        have_fp64 ? 1 : 0,
         version,
         attribs.target,
         attribs.localRAM,
@@ -804,6 +875,21 @@ void COPROC_ATI::clear() {
     atirt_detected = false;
     amdrt_detected = false;
     version_num = 0;
+    have_hip = false;
+    hip_version = 0;
+    hip_device_num = -1;
+    hip_cu_count = 0;
+    hip_lane_count = 0;
+    hip_warp_size = 0;
+    hip_clock_khz = 0;
+    hip_memory_clock_khz = 0;
+    hip_memory_bus_width = 0;
+    pci_bus = -1;
+    safe_strcpy(pci_bus_id, "");
+    gfx_target_version = 0;
+    gfxip_major = 0;
+    gfxip_minor = 0;
+    safe_strcpy(gcn_arch, "");
     is_used = COPROC_USED;
 }
 
@@ -835,6 +921,20 @@ int COPROC_ATI::parse(XML_PARSER& xp) {
         if (xp.parse_double("peak_flops", peak_flops)) continue;
         if (xp.parse_bool("have_cal", have_cal)) continue;
         if (xp.parse_bool("have_opencl", have_opencl)) continue;
+        if (xp.parse_bool("have_hip", have_hip)) continue;
+        if (xp.parse_double("peak_flops_dp", peak_flops_dp)) continue;
+        if (xp.parse_bool("have_fp64", have_fp64)) continue;
+        if (xp.parse_int("hip_version", hip_version)) continue;
+        if (xp.parse_int("hip_device_num", hip_device_num)) continue;
+        if (xp.parse_int("hip_cu_count", hip_cu_count)) continue;
+        if (xp.parse_int("hip_lane_count", hip_lane_count)) continue;
+        if (xp.parse_int("hip_clock_khz", hip_clock_khz)) continue;
+        if (xp.parse_int("gfx_target_version", gfx_target_version)) {
+            gfxip_major = gfx_target_version / 10000;
+            gfxip_minor = (gfx_target_version / 100) % 100;
+            continue;
+        }
+        if (xp.parse_str("gcn_arch", gcn_arch, sizeof(gcn_arch))) continue;
         if (xp.parse_double("available_ram", available_ram)) continue;
         if (xp.parse_double("req_secs", req_secs)) continue;
         if (xp.parse_double("req_instances", req_instances)) continue;
@@ -910,16 +1010,61 @@ int COPROC_ATI::parse(XML_PARSER& xp) {
 }
 
 void COPROC_ATI::description(char* buf, int buflen) {
+    char dp[64];
+    if (peak_flops_dp > 0) {
+        snprintf(dp, sizeof(dp), ", %s FP64",
+            flops_to_string(peak_flops_dp).c_str()
+        );
+    } else {
+        dp[0] = 0;
+    }
+    if (have_hip) {
+        snprintf(buf, buflen,
+            "%s (HIP version %d, %s, %.2fGB, %.2fGB available, %s peak%s)",
+            name, hip_version, gcn_arch[0] ? gcn_arch : "unknown arch",
+            attribs.localRAM/1024., available_ram/GIGA,
+            flops_to_string(peak_flops).c_str(), dp
+        );
+        return;
+    }
+    if (have_opencl) {
+        snprintf(buf, buflen,
+            "%s (OpenCL, %.2fGB, %.2fGB available, %s peak%s)",
+            name, attribs.localRAM/1024., available_ram/GIGA,
+            flops_to_string(peak_flops).c_str(), dp
+        );
+        return;
+    }
     snprintf(buf, buflen,
-        "%s (CAL version %s, %.2fGB, %.2fGB available, %s peak)",
+        "%s (CAL version %s, %.2fGB, %.2fGB available, %s peak%s)",
         name, version, attribs.localRAM/1024.,
-        available_ram/GIGA, flops_to_string(peak_flops).c_str()
+        available_ram/GIGA, flops_to_string(peak_flops).c_str(), dp
     );
 }
 
 void COPROC_ATI::set_peak_flops() {
     double x = 0;
-    if (attribs.numberOfSIMD) {
+    if (have_hip && hip_clock_khz > 0 && (hip_lane_count > 0 || hip_cu_count > 0)) {
+        // Number of FP32 lanes.  KFD gives it directly (simd_count x
+        // wavefront size).  Otherwise derive it from the HIP compute unit
+        // count: HIP reports one "compute unit" per workgroup processor
+        // on RDNA (wave32), i.e. 128 lanes, and one per CU on GCN
+        // (wave64), i.e. 64 lanes.
+        //
+        int lanes = hip_lane_count;
+        if (!lanes) {
+            int lanes_per_cu = (hip_warp_size == 32 || (!hip_warp_size && gfxip_major >= 10))
+                ? 128 : 64;
+            lanes = hip_cu_count * lanes_per_cu;
+        }
+        // One FMA per lane per clock is 2 FLOPs; RDNA 3+ (gfx11/gfx12)
+        // dual-issues FP32, i.e. 4 FLOPs.  If the architecture is
+        // unknown, stay with the conservative factor.
+        //
+        double flops_per_lane_per_clock = (gfxip_major >= 11) ? 4. : 2.;
+        x = (double)lanes * flops_per_lane_per_clock
+            * (hip_clock_khz * 1.e3);
+    } else if (attribs.numberOfSIMD) {
         x = attribs.numberOfSIMD * attribs.wavefrontSize * 5 * attribs.engineClock * 1.e6;
         // clock is in MHz
     } else if (opencl_prop.amd_simd_per_compute_unit) {
@@ -930,12 +1075,18 @@ void COPROC_ATI::set_peak_flops() {
         // Single precision performance is calculated as two times the number of shaders multiplied by the base core clock speed.
         // Per: https://en.wikipedia.org/wiki/List_of_AMD_graphics_processing_units
         //
+        // The "2" above is one FMA (2 FLOPs) per lane per clock, which is
+        // correct for VLIW, GCN and RDNA 1/2.  From RDNA 3 (gfx11) the
+        // SIMD engines dual-issue FP32, i.e. 2 FMAs = 4 FLOPs per lane per
+        // clock; without this factor the peak is under-reported by 2x.
+        //
         // clock is in MHz
+        double flops_per_lane_per_clock = (opencl_prop.gfxip_major >= 11) ? 4. : 2.;
         x = opencl_prop.max_compute_units *
             opencl_prop.amd_simd_per_compute_unit *
             opencl_prop.amd_simd_width *
             opencl_prop.amd_simd_instruction_width *
-            2 *
+            flops_per_lane_per_clock *
             (opencl_prop.max_clock_frequency * 1.e6);
 
     } else if (opencl_prop.max_compute_units) {
@@ -949,6 +1100,18 @@ void COPROC_ATI::set_peak_flops() {
         x = opencl_prop.max_compute_units * 16 * 5 * opencl_prop.max_clock_frequency * 1e6;
     }
     peak_flops = x;
+
+    peak_flops_dp = 0;
+    have_fp64 = false;
+    int gm = gfxip_major ? gfxip_major : (int)opencl_prop.gfxip_major;
+    double ratio = amd_fp64_ratio(gm, name);
+    if (ratio > 0 && x > 0) {
+        peak_flops_dp = x * ratio;
+        have_fp64 = true;
+    } else if (x > 0) {
+        // Rate unknown, but the device may still support FP64.
+        have_fp64 = (opencl_prop.double_fp_config != 0) || attribs.doublePrecision;
+    }
 }
 
 void COPROC_ATI::fake(double ram, double avail_ram, int n) {

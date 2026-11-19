@@ -48,6 +48,7 @@
     <ClCompile Include="..\client\gpu_intel.cpp" />
     <ClCompile Include="..\client\gpu_nvidia.cpp" />
     <ClCompile Include="..\client\gpu_opencl.cpp" />
+    <ClCompile Include="..\client\gpu_hip.cpp" />
     <ClCompile Include="..\client\gui_http.cpp" />
     <ClCompile Include="..\client\http_curl.cpp" />
     <ClCompile Include="..\client\net_stats.cpp" />

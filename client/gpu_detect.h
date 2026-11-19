@@ -36,4 +36,10 @@ extern std::vector<OPENCL_CPU_PROP> cpu_opencls;
 
 extern void gpu_warning(std::vector<std::string> &warnings, const char* msg);
 
+// Highest clock (MHz) in the GPU's DPM table, or -1 if unavailable.
+// If pci_bus >= 0 only that card is considered; otherwise the value is
+// returned only when the system has exactly one AMD GPU.
+//
+extern int amd_max_dpm_clock_mhz(int pci_bus);
+
 #endif
