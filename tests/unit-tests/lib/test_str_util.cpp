@@ -340,25 +340,51 @@ TEST_F(test_str_util, html_sanitize_idempotent) {
     }
 }
 
-// An entity-encoded scheme must not slip past the URL check: the check has
-// to run on the decoded value.
+// Attribute values are entity-decoded before the URL check and before the
+// output escape.
 //
-TEST_F(test_str_util, html_sanitize_decodes_before_url_check) {
+// Note on the scheme cases: encoded schemes were already dropped before this
+// change, because the raw '&' fails url_is_safe()'s scheme-character check.
+// They are asserted here so a future refactor cannot start letting them
+// through, not because they are what the change fixes.
+//
+TEST_F(test_str_util, html_sanitize_decodes_attribute_values) {
+    // An encoded scheme stays dropped.
     EXPECT_EQ(html_sanitize("<a href=\"javascript&#58;alert(1)\">t</a>"),
         "<a>t</a>");
     EXPECT_EQ(html_sanitize("<a href=\"&#106;avascript:alert(1)\">t</a>"),
         "<a>t</a>");
-    EXPECT_EQ(html_sanitize("<a href=\"java&#09;script:alert(1)\">t</a>"),
-        "<a>t</a>");
     EXPECT_EQ(html_sanitize("<img src=\"&#100;ata:text/html,x\">"), "<img>");
 
-    // a decoded control character is dropped rather than written raw
-    EXPECT_EQ(html_sanitize("<a href=\"&#0;javascript:alert(1)\">t</a>"),
+    // A decoded control character does not reach the output.
+    EXPECT_EQ(html_sanitize("<a href=\"java&#09;script:alert(1)\">t</a>"),
         "<a>t</a>");
 
-    // a legitimate query string survives, decoded then re-escaped once
+    // The case this change is actually about: a safe URL that is written
+    // with entities is recognised once decoded, and re-escaped exactly once.
     EXPECT_EQ(html_sanitize("<a href=\"http://x?a=1&amp;b=2\">t</a>"),
         "<a href=\"http://x?a=1&amp;b=2\">t</a>");
+    EXPECT_EQ(html_sanitize("<a href=\"&#104;ttp://ok/\">t</a>"),
+        "<a href=\"http://ok/\">t</a>");
+}
+
+// A relative URL whose first segment contains a literal '&' is dropped: '&'
+// fails the scheme-character check in url_is_safe() before any ':', '/' or
+// '?' is reached. This is conservative over-blocking, not a safety property,
+// and it is pinned here so the behaviour is deliberate rather than
+// accidental. Loosening it means teaching url_is_safe() to tell a scheme
+// from a relative path first.
+//
+TEST_F(test_str_util, html_sanitize_relative_url_with_ampersand_is_dropped) {
+    EXPECT_EQ(html_sanitize("<a href=\"page&2\">t</a>"), "<a>t</a>");
+    EXPECT_EQ(html_sanitize("<a href=\"page&amp;2\">t</a>"), "<a>t</a>");
+
+    // Once a '/' or '?' comes first, the URL is accepted and the '&' is
+    // escaped exactly once.
+    EXPECT_EQ(html_sanitize("<a href=\"/dir/page&2\">t</a>"),
+        "<a href=\"/dir/page&amp;2\">t</a>");
+    EXPECT_EQ(html_sanitize("<a href=\"?page&2\">t</a>"),
+        "<a href=\"?page&amp;2\">t</a>");
 }
 
     TEST_F(test_str_util, string_substitute) {

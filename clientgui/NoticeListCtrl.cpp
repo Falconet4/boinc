@@ -31,6 +31,22 @@
 #include "NoticeListCtrl.h"
 #include "str_util.h"
 
+// A notice's "link" field is project-supplied and reaches both a href we build
+// and the web view's navigation handler.  Only http(s) may do either: a
+// javascript: or file: URL would otherwise be followed by the web view (see
+// OnLinkClicked) and execute in the manager's page context.
+//
+// wxString::StartsWith() is case-sensitive but URL schemes are not, so compare
+// lowercased - otherwise "HTTP://..." would pass the check below and then fall
+// through to navigation.
+//
+static bool is_http_url(const wxString& url) {
+    wxString u = url;
+    u.Trim(true).Trim(false);
+    u.MakeLower();
+    return u.StartsWith(wxT("http://")) || u.StartsWith(wxT("https://"));
+}
+
 IMPLEMENT_DYNAMIC_CLASS( CNoticeListCtrl, wxWindow )
 
 CNoticeListCtrl::CNoticeListCtrl( wxWindow* parent ) {
@@ -243,7 +259,7 @@ void CNoticeListCtrl::SetItemCount(int newCount) {
 
             strBuffer += strCreateTime;
 
-            if (!strURL.IsEmpty()) {
+            if (is_http_url(strURL)) {
                 strTemp.Printf(
                     wxT(" &middot; <a href=\"%s\">%s</a> "),
                     html_escape(std::string(strURL.utf8_str())).c_str(),
@@ -274,10 +290,18 @@ void CNoticeListCtrl::Clear() {
 
 #if wxUSE_WEBVIEW
 void CNoticeListCtrl::OnLinkClicked( wxWebViewEvent& event ) {
-    if (event.GetURL().StartsWith(wxT("http://")) || event.GetURL().StartsWith(wxT("https://"))) {
+    if (is_http_url(event.GetURL())) {
+        // Open externally rather than inside the manager.
         event.Veto();   // Tell wxWebView not to follow link
-		wxLaunchDefaultBrowser(event.GetURL());
+		    wxLaunchDefaultBrowser(event.GetURL());
     } else {
+        // The notices page itself is presented through this event as
+        // "about:blank", so vetoing it here would leave the pane blank
+        // (verified against wx 3.2.4 / WebKit).  Nothing else can arrive from
+        // project content: the href below and every sanitised description link
+        // is http(s)-only, and a javascript: URL does not raise this event at
+        // all - so the scheme gate, not this handler, is what closes the hole.
+        //
         event.Skip();
     }
 }
@@ -292,12 +316,11 @@ void CNoticeListCtrl::OnWebViewError( wxWebViewEvent& event ) {
 #else
 void CNoticeListCtrl::OnLinkClicked( wxHtmlLinkEvent& event ) {
     wxString url = event.GetLinkInfo().GetHref();
-    if (url.StartsWith(wxT("http://")) || url.StartsWith(wxT("https://"))) {
-        // wxHtmlLinkEvent doesn't have Veto(), but only loads the page if you
-	      // call Skip().
+    // wxHtmlLinkEvent has no Veto(): the page is only loaded if we Skip(), so
+    // just don't.  Only http(s) is opened, in the system browser.
+    //
+    if (is_http_url(url)) {
 		    wxLaunchDefaultBrowser(url);
-    } else {
-        event.Skip();
     }
  }
 #endif
