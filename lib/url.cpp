@@ -127,12 +127,27 @@ static char x2c(char *what) {
 //
 void unescape_url(char *url, int url_size) {
     int x,y;
+    // A zero or negative size leaves no room even for the terminator; the
+    // clamp at the end would compute url_size-1 and write before the buffer.
+    //
+    if (url_size <= 0) return;
     for (x=0,y=0; url[y] && (x<url_size);++x,++y) {
+        // A trailing '%' (or "%X" at the very end) has no two hex digits to
+        // read; x2c() would read past the terminator.  Copy the remainder
+        // verbatim and stop, rather than decoding a partial escape.
+        //
+        if (url[y] == '%' && (!url[y+1] || !url[y+2])) {
+            while (url[y] && (x < url_size)) {
+                url[x++] = url[y++];
+            }
+            break;
+        }
         if ((url[x] = url[y]) == '%') {
             url[x] = x2c(&url[y+1]);
             y+=2;
         }
     }
+    if (x >= url_size) x = url_size-1;   // keep the terminator in bounds
     url[x] = '\0';
 }
 
@@ -233,6 +248,13 @@ void canonicalize_master_url(char* url, int len) {
         strcpy_overlap(p, p+1);
     }
     n = strlen(buf);
+    if (n == 0) {
+        // Nothing left after stripping the scheme: avoid buf[-1].  Fall back
+        // to the URL as given so the caller gets something usable.
+        //
+        snprintf(url, len, "http%s://", bSSL ? "s" : "");
+        return;
+    }
     if (buf[n-1] != '/' && (n<sizeof(buf)-2)) {
         safe_strcat(buf, "/");
     }

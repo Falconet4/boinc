@@ -44,17 +44,38 @@ int handle_trickle(MSG_FROM_HOST& mfh) {
         "got trickle-up \n%s\n\n",
         mfh.xml
     );
+
+    // mfh.xml is host-supplied and mth.xml is the same size, so wrapping it
+    // with the tags below overflows by their length.  Bound it first.
+    //
+    const char* close_tag = "</trickle_down>";
+    size_t overhead =
+        strlen("<trickle_down>\n") + strlen("\n") + strlen(close_tag);
+    if (strlen(mfh.xml) + overhead + 1 > MSG_TO_HOST_BLOB_SIZE) {
+        printf("trickle-up too long (%zu bytes), dropping\n", strlen(mfh.xml));
+        return 0;
+    }
+
+    // The body is re-sent to another client wrapped in <trickle_down>; a host
+    // embedding the closing tag would end the section early and have the rest
+    // parsed as scheduler XML.
+    //
+    if (strstr(mfh.xml, close_tag)) {
+        printf("trickle-up contains %s, dropping\n", close_tag);
+        return 0;
+    }
+
     DB_MSG_TO_HOST mth;
     mth.clear();
     mth.create_time = time(0);
     mth.hostid = mfh.hostid;
     safe_strcpy(mth.variety, mfh.variety);
     mth.handled = false;
-    sprintf(mth.xml,
+    snprintf(mth.xml, sizeof(mth.xml),
         "<trickle_down>\n"
         "%s"
-        "</trickle_down>\n",
-        mfh.xml
+        "%s\n",
+        mfh.xml, close_tag
     );
     retval = mth.insert();
     if (retval) {

@@ -126,24 +126,26 @@ int init_result(const RESULT& result, void*&) {
         return retval;
     }
 
-    char cmd[4096];
-    sprintf(cmd, "../bin/%s", init_script[0].c_str());
+    // The script arguments and the output file paths are project-supplied
+    // and reach system() unquoted; quote each one.  Build into a std::string
+    // instead of strcat() into a fixed buffer.
+    //
+    string cmd = "../bin/" + shell_quote(init_script[0]);
     for (unsigned i=1; i<init_script.size(); i++) {
         string& s = init_script[i];
         if (s == "files") {
             for (unsigned j=0; j<paths.size(); j++) {
-                safe_strcat(cmd, " ");
-                safe_strcat(cmd, paths[j].c_str());
+                cmd += " " + shell_quote(paths[j]);
             }
         } else if (s == "runtime") {
-            sprintf(buf, " %f", result.elapsed_time);
-            safe_strcat(cmd, buf);
+            snprintf(buf, sizeof(buf), " %f", result.elapsed_time);
+            cmd += buf;
         } else if (s == "result_id") {
-            sprintf(buf, " %lu", result.id);
-            safe_strcat(cmd, buf);
+            snprintf(buf, sizeof(buf), " %lu", result.id);
+            cmd += buf;
         }
     }
-    retval = system(cmd);
+    retval = system(cmd.c_str());
     if (WIFEXITED(retval)) {
         int s = WEXITSTATUS(retval);
         if (!s) return 0;
@@ -154,11 +156,11 @@ int init_result(const RESULT& result, void*&) {
             return VAL_RESULT_TRANSIENT_ERROR;
         }
         log_messages.printf(MSG_NORMAL,
-            "init script %s returned: %d\n", cmd, s
+            "init script %s returned: %d\n", cmd.c_str(), s
         );
         return -1;
     }
-    log_messages.printf(MSG_CRITICAL, "init script %s didn't exit\n", cmd);
+    log_messages.printf(MSG_CRITICAL, "init script %s didn't exit\n", cmd.c_str());
     return -1;
 }
 
@@ -183,35 +185,32 @@ int compare_results(RESULT& r1, void*, RESULT const& r2, void*, bool& match) {
         return retval;
     }
 
-    char cmd[4096];
-    sprintf(cmd, "../bin/%s", compare_script[0].c_str());
+    string cmd = "../bin/" + shell_quote(compare_script[0]);
     for (unsigned i=1; i<compare_script.size(); i++) {
         string& s = compare_script[i];
         if (s == "files") {
             for (unsigned j=0; j<paths1.size(); j++) {
-                safe_strcat(cmd, " ");
-                safe_strcat(cmd, paths1[j].c_str());
+                cmd += " " + shell_quote(paths1[j]);
             }
         } else if (s == "files2") {
             for (unsigned j=0; j<paths2.size(); j++) {
-                safe_strcat(cmd, " ");
-                safe_strcat(cmd, paths2[j].c_str());
+                cmd += " " + shell_quote(paths2[j]);
             }
         } else if (s == "runtime") {
-            sprintf(buf, " %f", r1.elapsed_time);
-            safe_strcat(cmd, buf);
+            snprintf(buf, sizeof(buf), " %f", r1.elapsed_time);
+            cmd += buf;
         } else if (s == "result_id") {
-            sprintf(buf, " %lu", r1.id);
-            safe_strcat(cmd, buf);
+            snprintf(buf, sizeof(buf), " %lu", r1.id);
+            cmd += buf;
         } else if (s == "runtime2") {
-            sprintf(buf, " %f", r2.elapsed_time);
-            safe_strcat(cmd, buf);
+            snprintf(buf, sizeof(buf), " %f", r2.elapsed_time);
+            cmd += buf;
         } else if (s == "result_id2") {
-            sprintf(buf, " %lu", r2.id);
-            safe_strcat(cmd, buf);
+            snprintf(buf, sizeof(buf), " %lu", r2.id);
+            cmd += buf;
         }
     }
-    retval = system(cmd);
+    retval = system(cmd.c_str());
     if (WIFEXITED(retval)) {
         int s = WEXITSTATUS(retval);
         if (s == 0) {
@@ -224,7 +223,7 @@ int compare_results(RESULT& r1, void*, RESULT const& r2, void*, bool& match) {
         match = false;
         return 0;
     }
-    log_messages.printf(MSG_CRITICAL, "compare script %s didn't exit\n", cmd);
+    log_messages.printf(MSG_CRITICAL, "compare script %s didn't exit\n", cmd.c_str());
     return -1;
 }
 

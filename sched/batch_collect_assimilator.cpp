@@ -41,7 +41,7 @@ const char* outdir = "../results";
 
 int write_error(WORKUNIT &wu, char* p) {
     char path[1024];
-    sprintf(path, "%s/%d/%s_error", outdir, wu.batch, wu.name);
+    snprintf(path, sizeof(path), "%s/%d/%s_error", outdir, wu.batch, wu.name);
     FILE* f = fopen(path, "a");
     if (!f) return ERR_FOPEN;
     fprintf(f, "%s", p);
@@ -85,7 +85,7 @@ int assimilate_handler(
         get_output_file_infos(canonical_result, output_files);
         bool file_copied = false;
         for (const OUTPUT_FILE_INFO& fi: output_files) {
-            sprintf(buf, "%s/%d/%s__file_%s",
+            snprintf(buf, sizeof(buf), "%s/%d/%s__file_%s",
                 outdir, wu.batch, wu.name, fi.logical_name.c_str()
             );
             retval = boinc_rename(fi.path.c_str() , buf);
@@ -94,7 +94,7 @@ int assimilate_handler(
             }
         }
         if (!file_copied) {
-            sprintf(buf, "%s/%d/%s_no_output_files", outdir, wu.batch, wu.name);
+            snprintf(buf, sizeof(buf), "%s/%d/%s_no_output_files", outdir, wu.batch, wu.name);
             FILE* f = fopen(buf, "w");
             if (!f) return ERR_FOPEN;
             fclose(f);

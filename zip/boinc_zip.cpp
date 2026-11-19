@@ -81,6 +81,36 @@ namespace {
         return boinc_make_dirs(base_dir.c_str(), rel.c_str());
     }
 
+    // Reject archive entry names that would escape the extraction directory.
+    //
+    // Entry names are attacker-controlled: a project can ship an input archive
+    // whose entries are "../../x" or "/etc/x", and both ensure_subdirs() and
+    // join_path() just concatenate.  Allow ordinary relative paths and the
+    // ".." *component* only where it stays inside (we do not allow it at all,
+    // since a legitimately packed archive does not need it).
+    //
+    static bool is_safe_entry_name(const string& name) {
+        if (name.empty()) return false;
+        // absolute POSIX path
+        if (name[0] == '/') return false;
+        // Windows drive letter or UNC path
+        if (name.size() >= 2 && name[1] == ':') return false;
+        if (name[0] == '\\') return false;
+
+        // Walk the components; reject any ".." and any empty component that
+        // is not the trailing separator of a directory entry.
+        size_t pos = 0;
+        while (pos <= name.size()) {
+            size_t sep = name.find_first_of("/\\", pos);
+            if (sep == string::npos) sep = name.size();
+            const string comp = name.substr(pos, sep-pos);
+            if (comp == "..") return false;
+            if (sep == name.size()) break;
+            pos = sep + 1;
+        }
+        return true;
+    }
+
 #ifndef _WIN32
     // Set POSIX permissions from libzip external attributes when present
     static void apply_permissions_if_possible(const string& path, zip_t* za,
@@ -211,6 +241,12 @@ int boinc_zip(
             }
             string name = zs.name ? string(zs.name) : string();
             if (name.empty()) continue;
+
+            // Reject traversal and absolute paths before creating anything.
+            if (!is_safe_entry_name(name)) {
+                zip_discard(za);
+                return 2;
+            }
 
             // Directory entry (convention: ends with '/')
             if (name.back() == '/' || name.back() == '\\') {

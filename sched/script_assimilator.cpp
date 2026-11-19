@@ -96,14 +96,19 @@ int assimilate_handler(
     WORKUNIT& wu, vector<RESULT>& /*results*/, RESULT& canonical_result
 ) {
     int retval;
-    char cmd[4096], buf[256];
+    char buf[256];
 
     log_messages.printf(MSG_DEBUG,
         "assimilate handler: WU ID %ld canonical result %ld\n",
         wu.id, wu.canonical_resultid
     );
+    // Every interpolated value below is built from project-supplied data
+    // (workunit name, output file paths and logical names) and the result is
+    // passed to system(), so quote each one.  Build into a std::string rather
+    // than strcat() into a fixed buffer.
+    //
+    string cmd = "../bin/" + shell_quote(script_args[0]);
     if (wu.canonical_resultid) {
-        sprintf(cmd, "../bin/%s", script_args[0].c_str());
         vector<OUTPUT_FILE_INFO> fis;
         retval = get_output_file_infos(canonical_result, fis);
         if (retval) return retval;
@@ -111,31 +116,27 @@ int assimilate_handler(
             string& s = script_args[i];
             if (s == "files") {
                 for (OUTPUT_FILE_INFO &fi: fis) {
-                    strcat(cmd, " ");
-                    strcat(cmd, fi.path.c_str());
+                    cmd += " " + shell_quote(fi.path);
                 }
             } else if (s == "files2") {
                 for (OUTPUT_FILE_INFO &fi: fis) {
-                    strcat(cmd, " ");
-                    strcat(cmd, fi.path.c_str());
-                    strcat(cmd, " ");
-                    strcat(cmd, fi.logical_name.c_str());
+                    cmd += " " + shell_quote(fi.path);
+                    cmd += " " + shell_quote(fi.logical_name);
                 }
             } else if (s == "wu_id") {
-                sprintf(buf, " %lu", wu.id);
-                strcat(cmd, buf);
+                snprintf(buf, sizeof(buf), " %lu", wu.id);
+                cmd += buf;
             } else if (s == "wu_name") {
-                sprintf(buf, " %s", wu.name);
-                strcat(cmd, buf);
+                cmd += " " + shell_quote(wu.name);
             } else if (s == "result_id") {
-                sprintf(buf, " %lu", wu.canonical_resultid);
-                strcat(cmd, buf);
+                snprintf(buf, sizeof(buf), " %lu", wu.canonical_resultid);
+                cmd += buf;
             } else if (s == "runtime") {
-                sprintf(buf, " %f", canonical_result.elapsed_time);
-                strcat(cmd, buf);
+                snprintf(buf, sizeof(buf), " %f", canonical_result.elapsed_time);
+                cmd += buf;
             } else if (s == "batch_id") {
-                sprintf(buf, " %d", wu.batch);
-                strcat(cmd, buf);
+                snprintf(buf, sizeof(buf), " %d", wu.batch);
+                cmd += buf;
             } else {
                 log_messages.printf(MSG_CRITICAL,
                     "Unrecognized script arg '%s'\n", s.c_str()
@@ -144,15 +145,16 @@ int assimilate_handler(
             }
         }
     } else {
-        sprintf(cmd, "../bin/%s --error %d %s %lu %d",
-            script_args[0].c_str(), wu.error_mask, wu.name, wu.id, wu.batch
-        );
+        snprintf(buf, sizeof(buf), "--error %d", wu.error_mask);
+        cmd += string(" ") + buf + " " + shell_quote(wu.name);
+        snprintf(buf, sizeof(buf), " %lu %d", wu.id, wu.batch);
+        cmd += buf;
     }
-    log_messages.printf(MSG_DEBUG, "invoking script: %s\n", cmd);
-    retval = system(cmd);
+    log_messages.printf(MSG_DEBUG, "invoking script: %s\n", cmd.c_str());
+    retval = system(cmd.c_str());
     if (retval) {
         log_messages.printf(MSG_NORMAL,
-            "error %d from script: %s\n", retval, cmd
+            "error %d from script: %s\n", retval, cmd.c_str()
         );
         return retval;
     }

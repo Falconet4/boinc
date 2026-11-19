@@ -1602,8 +1602,13 @@ void get_weak_auth(USER& user, char* buf) {
 }
 
 void get_rss_auth(USER& user, char* buf) {
-    char buf2[256], out[256];
-    sprintf(buf2, "%s%s%s", user.authenticator, user.passwd_hash, "notify_rss");
+    // Both fields are char[256] in DB_USER, so authenticator + passwd_hash +
+    // the "notify_rss" suffix can reach 521 bytes.  This buffer held 256 and
+    // the sprintf below wrote all of it, overwriting the stack.  Use the same
+    // size get_weak_auth() uses for the same two fields.
+    //
+    char buf2[1024], out[256];
+    snprintf(buf2, sizeof(buf2), "%s%s%s", user.authenticator, user.passwd_hash, "notify_rss");
     md5_block((unsigned char*)buf2, strlen(buf2), out);
     sprintf(buf, "%lu_%s", user.id, out);
 }
