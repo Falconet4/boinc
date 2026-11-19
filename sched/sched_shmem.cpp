@@ -143,8 +143,18 @@ int SCHED_SHMEM::scan_tables() {
             app.non_cpu_intensive = true;
         }
         if (app.n_size_classes > 1) {
+            // app.name comes from the project DB and is interpolated into a
+            // path; a name containing "/" or ".." would escape the project
+            // directory.
+            //
+            if (strchr(app.name, '/') || strstr(app.name, "..")) {
+                log_messages.printf(MSG_CRITICAL,
+                    "bad app name for size census: %s\n", app.name
+                );
+                return ERR_XML_PARSE;
+            }
             char path[MAXPATHLEN];
-            sprintf(path, "../size_census_%s", app.name);
+            snprintf(path, sizeof(path), "../size_census_%s", app.name);
             FILE* f = boinc::fopen(path, "r");
             if (!f) {
                 log_messages.printf(MSG_CRITICAL,

@@ -337,4 +337,23 @@ namespace test_str_util {
         EXPECT_STREQ(buf, "");
     }
 
+// shell_quote() must produce exactly one shell word for any input.
+//
+TEST_F(test_str_util, shell_quote) {
+    EXPECT_EQ(shell_quote(""), "''");
+    EXPECT_EQ(shell_quote("abc"), "'abc'");
+    EXPECT_EQ(shell_quote("a b"), "'a b'");
+    // an embedded quote is split out as '\'' so it cannot close the quoting
+    EXPECT_EQ(shell_quote("it's"), "'it'\\''s'");
+    // characters the shell would otherwise act on stay literal
+    EXPECT_EQ(shell_quote("$(id)"), "'$(id)'");
+    EXPECT_EQ(shell_quote("`id`"), "'`id`'");
+    EXPECT_EQ(shell_quote("x;rm -rf /"), "'x;rm -rf /'");
+    EXPECT_EQ(shell_quote("a|b&c>d"), "'a|b&c>d'");
+    // NULL maps to an empty quoted word rather than crashing
+    const char* null = NULL;
+    EXPECT_EQ(shell_quote(null), "''");
 }
+
+}
+

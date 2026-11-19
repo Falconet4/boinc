@@ -186,7 +186,10 @@ static int parse_rss_time(char* buf) {
 #ifdef _WIN32
     char day_name[64], month_name[64];
     int day_num, year, h, m, s;
-    sscanf(buf, "%s %d %s %d %d:%d:%d",
+    // Bound the two strings: the RSS pubDate is project-controlled and "%s"
+    // has no width, so a long token overflows the 64-byte buffers.
+    //
+    sscanf(buf, "%63s %d %63s %d %d:%d:%d",
         day_name, &day_num, month_name, &year, &h, &m, &s
     );
 

@@ -901,3 +901,32 @@ int path_to_filename(string fpath, char* &fname) {
     strcpy(fname, name.c_str());
     return 0;
 }
+
+// Quote one string so a POSIX shell treats it as a single word with no
+// expansion, and return it as a std::string.
+//
+// Wrap in single quotes and replace every embedded ' with '\'' (close quote,
+// escaped quote, reopen).  The result is safe to concatenate into a command
+// line that will be passed to system() or popen().  This is the C equivalent
+// of PHP's escapeshellarg().
+//
+std::string shell_quote(const std::string& in) {
+    std::string out;
+    out += '\'';
+    for (char c: in) {
+        if (c == '\'') {
+            out += "'\\''";
+        } else {
+            out += c;
+        }
+    }
+    out += '\'';
+    return out;
+}
+
+// Same, for a C string that may be NULL.
+//
+std::string shell_quote(const char* in) {
+    if (!in) return "''";
+    return shell_quote(std::string(in));
+}

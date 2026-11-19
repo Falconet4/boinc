@@ -41,6 +41,9 @@ extern char* time_to_string(double, bool utc=false);
 extern char* precision_time_to_string(double, bool utc=false);
 extern void secs_to_hmsf(double, char*);
 extern std::string timediff_format(double);
+extern std::string shell_quote(const std::string&);
+extern std::string shell_quote(const char*);
+    // quote one word for a POSIX shell; safe to pass to system()/popen()
 
 inline bool empty(char* p) {
     return p[0] == 0;
