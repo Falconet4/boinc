@@ -1281,6 +1281,14 @@ int SCHED_DB_RESULT::write_to_client(FILE* fout) {
         );
     }
 
+    if (n_gpu_device_nums) {
+        boinc::fputs("    <gpu_device_nums>", fout);
+        for (int i=0; i<n_gpu_device_nums; i++) {
+            boinc::fprintf(fout, "%s%d", i?" ":"", gpu_device_nums[i]);
+        }
+        boinc::fputs("</gpu_device_nums>\n", fout);
+    }
+
     boinc::fputs("</result>\n", fout);
     return 0;
 }

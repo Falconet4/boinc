@@ -79,7 +79,24 @@ using std::vector;
 // - GPU exclusions
 // - OpenCL availability (relevant if use_all_gpus set)
 //
+static inline bool gpu_device_allowed(RESULT* rp, COPROC* cp, int i) {
+    int dev = cp->device_nums[i];
+    if (device_num_allowed(
+        rp->gpu_device_nums, rp->n_gpu_device_nums, dev
+    )) {
+        return true;
+    }
+    COPROC_DEBUG(msg_printf(rp->project, MSG_INFO,
+        "GPU device %d is not in the server's allowed set for %s",
+        dev, rp->name
+    ));
+    return false;
+}
+
 static inline bool can_use_gpu(RESULT* rp, COPROC* cp, int i) {
+    if (!gpu_device_allowed(rp, cp, i)) {
+        return false;
+    }
     if (gpu_excluded(rp->app, *cp, i)) {
         COPROC_DEBUG(msg_printf(rp->project, MSG_INFO, "GPU %d is excluded for %s", i, rp->name));
         return false;

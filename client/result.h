@@ -18,6 +18,7 @@
 #ifndef BOINC_RESULT_H
 #define BOINC_RESULT_H
 
+#include "coproc.h"
 #include "project.h"
 
 struct RESULT {
@@ -28,6 +29,9 @@ struct RESULT {
     int version_num;        // identifies the app used
     char plan_class[64];
         // used to associate this RESULT with an APP_VERSION
+    int gpu_device_nums[MAX_COPROC_INSTANCES];
+        // AMD device numbers this result may use; empty = no restriction
+    int n_gpu_device_nums;
     char platform[256];
     APP_VERSION* avp;
     std::vector<FILE_REF> output_files;

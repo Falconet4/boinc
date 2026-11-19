@@ -54,6 +54,7 @@ void RESULT::clear() {
     report_deadline = 0;
     version_num = 0;
     safe_strcpy(plan_class, "");
+    n_gpu_device_nums = 0;
     safe_strcpy(platform, "");
     avp = NULL;
     output_files.clear();
@@ -101,6 +102,7 @@ void RESULT::clear() {
 //
 int RESULT::parse_server(XML_PARSER& xp) {
     FILE_REF file_ref;
+    char buf[1024];
     int retval;
 
     clear();
@@ -112,6 +114,10 @@ int RESULT::parse_server(XML_PARSER& xp) {
         if (xp.parse_str("platform", platform, sizeof(platform))) continue;
         if (xp.parse_str("plan_class", plan_class, sizeof(plan_class))) continue;
         if (xp.parse_int("version_num", version_num)) continue;
+        if (xp.parse_str("gpu_device_nums", buf, sizeof(buf))) {
+            parse_device_num_list(buf, gpu_device_nums, n_gpu_device_nums);
+            continue;
+        }
         if (xp.match_tag("file_ref")) {
             retval = file_ref.parse(xp);
             if (retval) {
@@ -140,6 +146,7 @@ int RESULT::parse_server(XML_PARSER& xp) {
 //
 int RESULT::parse_state(XML_PARSER& xp) {
     FILE_REF file_ref;
+    char buf[1024];
     int retval;
 
     clear();
@@ -202,6 +209,10 @@ int RESULT::parse_state(XML_PARSER& xp) {
         if (xp.parse_str("platform", platform, sizeof(platform))) continue;
         if (xp.parse_str("plan_class", plan_class, sizeof(plan_class))) continue;
         if (xp.parse_int("version_num", version_num)) continue;
+        if (xp.parse_str("gpu_device_nums", buf, sizeof(buf))) {
+            parse_device_num_list(buf, gpu_device_nums, n_gpu_device_nums);
+            continue;
+        }
         if (log_flags.unparsed_xml) {
             msg_printf(0, MSG_INFO,
                 "[unparsed_xml] RESULT::parse(): unrecognized: %s\n",
@@ -326,6 +337,13 @@ int RESULT::write(MIOFILE& out, bool to_server) {
             retval = fref.write(out);
             if (retval) return retval;
         }
+    }
+    if (!to_server && n_gpu_device_nums) {
+        out.printf("    <gpu_device_nums>");
+        for (int i=0; i<n_gpu_device_nums; i++) {
+            out.printf("%s%d", i?" ":"", gpu_device_nums[i]);
+        }
+        out.printf("</gpu_device_nums>\n");
     }
     out.printf("</result>\n");
     return 0;

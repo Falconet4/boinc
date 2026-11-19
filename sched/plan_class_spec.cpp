@@ -251,10 +251,58 @@ bool PLAN_CLASS_SPEC::check_wsl_gpu(SCHEDULER_REQUEST& sreq, string gpu_name) {
 // with this plan class.
 // If so, return the resource usage and estimated FLOPS in hu.
 //
+static bool amd_select_devices(
+    const PLAN_CLASS_SPEC& spec, const COPROC_ATI& cp, HOST_USAGE& hu,
+    COPROC_ATI& cp_dev, COPROC_ATI_DEVICE& best, double& gpu_ram_min,
+    bool& per_device
+) {
+    per_device = !cp.devices.empty();
+    hu.n_gpu_device_nums = 0;
+    if (!per_device) return true;
+
+    AMD_DEVICE_REQUIREMENTS req;
+    req.require_hip = spec.require_hip;
+    req.min_hip_version = spec.min_hip_version;
+    req.require_fp64 = spec.require_fp64;
+    req.min_gpu_dp_flops = spec.min_gpu_dp_flops;
+    req.min_gpu_ram_mb = spec.min_gpu_ram_mb;
+    req.min_gpu_peak_flops = spec.min_gpu_peak_flops;
+    req.max_gpu_peak_flops = spec.max_gpu_peak_flops;
+    req.gcn_arch_regex = &spec.gcn_arch_regex;
+
+    int best_index = -1;
+    int n_matches = amd_matching_devices(
+        req, cp, hu.gpu_device_nums, MAX_COPROC_INSTANCES,
+        best_index, gpu_ram_min
+    );
+    hu.n_gpu_device_nums = n_matches;
+    if (!n_matches) return false;
+    best = cp.devices[best_index];
+
+    cp_dev = cp;
+    cp_dev.count = 1;
+    safe_strcpy(cp_dev.name, best.name);
+    safe_strcpy(cp_dev.gcn_arch, best.gcn_arch);
+    cp_dev.gfx_target_version = best.gfx_target_version;
+    cp_dev.have_hip = best.have_hip;
+    cp_dev.hip_version = best.hip_version;
+    cp_dev.have_fp64 = best.have_fp64;
+    cp_dev.peak_flops = best.peak_flops;
+    cp_dev.peak_flops_dp = best.peak_flops_dp;
+    cp_dev.attribs.localRAM = (int)(gpu_ram_min / MEGA);
+    cp_dev.opencl_prop.global_mem_size = gpu_ram_min;
+    cp_dev.available_ram = gpu_ram_min;
+    return true;
+}
+
 bool PLAN_CLASS_SPEC::check(
     SCHEDULER_REQUEST& sreq, HOST_USAGE& hu, const WORKUNIT* wu
 ) {
     COPROC* cpp = NULL;
+    COPROC_ATI cp_dev;
+    COPROC_ATI_DEVICE best_dev;
+    bool per_device = false;
+    double gpu_ram_min = 0;
     bool can_use_multicore = true;
     string msg;
     bool opencl_other = false;
@@ -276,6 +324,7 @@ bool PLAN_CLASS_SPEC::check(
     // default is sequential app
     //
     hu.sequential_app(sreq.host.p_fpops);
+    hu.n_gpu_device_nums = 0;
 
     // ID restrictions
     //
@@ -693,6 +742,8 @@ bool PLAN_CLASS_SPEC::check(
     //
     if (!strcmp(gpu_type, "amd") || !strcmp(gpu_type, "ati")) {
         COPROC_ATI& cp = sreq.coprocs.ati;
+        per_device = !cp.devices.empty();
+
         cpp = &cp;
 
         if (!cp.count) {
@@ -702,6 +753,20 @@ bool PLAN_CLASS_SPEC::check(
                 );
             }
             return false;
+        }
+
+        if (!amd_select_devices(
+            *this, cp, hu, cp_dev, best_dev, gpu_ram_min, per_device
+        )) {
+            if (config.debug_version_select) {
+                log_messages.printf(MSG_NORMAL,
+                    "[version] plan_class_spec: no AMD device matches the plan class\n"
+                );
+            }
+            return false;
+        }
+        if (per_device) {
+            cpp = &cp_dev;
         }
         if (min_gpu_ram_mb) {
             gpu_requirements[PROC_TYPE_AMD_GPU].update(0, min_gpu_ram_mb * MEGA);
@@ -775,10 +840,14 @@ bool PLAN_CLASS_SPEC::check(
         if (cp.bad_gpu_peak_flops("AMD", msg)) {
             log_messages.printf(MSG_NORMAL, "%s\n", msg.c_str());
         }
-        gpu_ram = cp.opencl_prop.global_mem_size;
-        if (!gpu_ram) {
-            // HIP-only host: no OpenCL device, but localRAM is total VRAM.
-            gpu_ram = (double)cp.attribs.localRAM * MEGA;
+        if (per_device) {
+            gpu_ram = gpu_ram_min;
+        } else {
+            gpu_ram = cp.opencl_prop.global_mem_size;
+            if (!gpu_ram) {
+                // HIP-only host: no OpenCL device, but localRAM is total VRAM.
+                gpu_ram = (double)cp.attribs.localRAM * MEGA;
+            }
         }
 
         driver_version = 0;
@@ -969,6 +1038,26 @@ bool PLAN_CLASS_SPEC::check(
             return false;
         }
         opencl_other = true;
+        if (cpp && !strcmp(cpp->type, sreq.coprocs.ati.type)
+            && !sreq.coprocs.ati.devices.empty()
+        ) {
+            if (!amd_select_devices(
+                *this, sreq.coprocs.ati, hu, cp_dev, best_dev,
+                gpu_ram_min, per_device
+            )) {
+                return false;
+            }
+            cpp = &cp_dev;
+            if (per_device) {
+                gpu_ram = gpu_ram_min;
+                hu.proc_type = PROC_TYPE_AMD_GPU;
+                hu.gpu_usage = (ngpus > 0)? ngpus*gpu_utilization : 1;
+                hu.gpu_ram = gpu_ram;
+                hu.peak_flops = gpu_peak_flops_scale * hu.gpu_usage
+                    * cp_dev.peak_flops;
+                hu.projected_flops = hu.peak_flops;
+            }
+        }
     } else if (strlen(gpu_type)) {
         cpp = sreq.coprocs.lookup_type(gpu_type);
         if (!cpp) {
@@ -1059,7 +1148,12 @@ bool PLAN_CLASS_SPEC::check(
             bool is_amd = (cpp == &sreq.coprocs.ati)
                 || (sreq.coprocs.ati.count
                     && !strcmp(cpp->type, sreq.coprocs.ati.type));
-            if (!is_amd || !sreq.coprocs.ati.have_hip) {
+            // cpp may be the aggregate, the per-device representative, or
+            // a base COPROC from the coprocs array; use the aggregate when
+            // it is not one of our derived objects.
+            COPROC_ATI* ati_cpp = (cpp == &cp_dev)
+                ? &cp_dev : &sreq.coprocs.ati;
+            if (!is_amd || !ati_cpp->have_hip) {
                 if (config.debug_version_select) {
                     log_messages.printf(MSG_NORMAL,
                         "[version] plan_class_spec: GPU does not support HIP\n"
@@ -1067,11 +1161,11 @@ bool PLAN_CLASS_SPEC::check(
                 }
                 return false;
             }
-            if (min_hip_version && sreq.coprocs.ati.hip_version < min_hip_version) {
+            if (min_hip_version && ati_cpp->hip_version < min_hip_version) {
                 if (config.debug_version_select) {
                     char min_ver[32], supplied_ver[32];
                     format_hip_version(min_hip_version, min_ver, sizeof(min_ver));
-                    format_hip_version(sreq.coprocs.ati.hip_version,
+                    format_hip_version(ati_cpp->hip_version,
                         supplied_ver, sizeof(supplied_ver));
                     log_messages.printf(MSG_NORMAL,
                         "[version] plan_class_spec: HIP version required min: %s, supplied: %s\n",
@@ -1081,13 +1175,13 @@ bool PLAN_CLASS_SPEC::check(
                 return false;
             }
             if (gcn_arch_regex.is_set()
-                && (!sreq.coprocs.ati.gcn_arch[0]
-                    || regexec(gcn_arch_regex.get(), sreq.coprocs.ati.gcn_arch, 0, NULL, 0))
+                && (!ati_cpp->gcn_arch[0]
+                    || regexec(gcn_arch_regex.get(), ati_cpp->gcn_arch, 0, NULL, 0))
             ) {
                 if (config.debug_version_select) {
                     log_messages.printf(MSG_NORMAL,
                         "[version] plan_class_spec: gcn_arch does not match regex: %s\n",
-                        sreq.coprocs.ati.gcn_arch
+                        ati_cpp->gcn_arch
                     );
                 }
                 return false;

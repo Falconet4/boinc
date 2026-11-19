@@ -84,6 +84,9 @@ struct HOST_USAGE {
     char custom_coproc_type[256];
         // if we're using a custom GPU type, its name
         // TODO: get rid of PROC_TYPE_*, and this
+    int gpu_device_nums[MAX_COPROC_INSTANCES];
+        // AMD devices compatible with this job; empty means no restriction
+    int n_gpu_device_nums;
 
     HOST_USAGE() {
         proc_type = PROC_TYPE_CPU;
@@ -95,6 +98,7 @@ struct HOST_USAGE {
         peak_flops = 0;
         strcpy(cmdline, "");
         strcpy(custom_coproc_type, "");
+        n_gpu_device_nums = 0;
     }
     void sequential_app(double flops) {
         proc_type = PROC_TYPE_CPU;
@@ -106,6 +110,7 @@ struct HOST_USAGE {
         projected_flops = flops;
         peak_flops = flops;
         strcpy(cmdline, "");
+        n_gpu_device_nums = 0;
     }
     inline bool is_sequential_app() {
          if (proc_type != PROC_TYPE_CPU) return false;
@@ -209,6 +214,8 @@ struct SCHED_DB_RESULT : DB_RESULT {
     int parse_from_client(XML_PARSER&);
     char platform_name[256];
     BEST_APP_VERSION bav;
+    int gpu_device_nums[MAX_COPROC_INSTANCES];
+    int n_gpu_device_nums;
 
     int write_to_client(FILE*);
 };

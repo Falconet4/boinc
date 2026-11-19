@@ -338,6 +338,62 @@ inline int ati_version_int(int major, int minor, int release) {
 //
 extern void format_hip_version(int v, char* buf, int buflen);
 
+// Parse a space-separated list of GPU device numbers.  Out-of-range and
+// malformed entries are ignored.
+//
+inline void parse_device_num_list(const char* s, int* nums, int& n) {
+    n = 0;
+    const char* p = s;
+    while (*p && n < MAX_COPROC_INSTANCES) {
+        while (*p == ' ' || *p == '\t') p++;
+        if (!*p) break;
+        char* end = NULL;
+        long v = strtol(p, &end, 10);
+        if (end == p) break;
+        if (v >= 0 && v < MAX_COPROC_INSTANCES) {
+            nums[n++] = (int)v;
+        }
+        p = end;
+    }
+}
+
+// True if dev is in nums (or if nums is empty, meaning no restriction).
+//
+inline bool device_num_allowed(const int* nums, int n, int dev) {
+    if (!n) return true;
+    for (int i=0; i<n; i++) {
+        if (nums[i] == dev) return true;
+    }
+    return false;
+}
+
+struct COPROC_ATI_DEVICE {
+    char name[256];
+    char gcn_arch[64];
+    int gfx_target_version;
+    int device_num;
+    int hip_version;
+    bool have_hip;
+    bool have_fp64;
+    double peak_flops;
+    double peak_flops_dp;
+    double total_ram;       // bytes; total, not free
+
+    void clear() {
+        name[0] = 0;
+        gcn_arch[0] = 0;
+        gfx_target_version = 0;
+        device_num = -1;
+        hip_version = 0;
+        have_hip = false;
+        have_fp64 = false;
+        peak_flops = 0;
+        peak_flops_dp = 0;
+        total_ram = 0;
+    }
+    COPROC_ATI_DEVICE() { clear(); }
+};
+
 struct COPROC_ATI : public COPROC {
     char name[256];
     char version[50];
@@ -366,6 +422,12 @@ struct COPROC_ATI : public COPROC {
     int gfxip_minor;
     char gcn_arch[64];          // e.g. "gfx1200"
 
+    // Every physical AMD GPU found, with its own capabilities.  The
+    // aggregate fields above remain for scheduler compatibility; this
+    // list is for reporting and future per-device scheduling.
+    //
+    std::vector<COPROC_ATI_DEVICE> devices;
+
 #ifndef _USING_FCGI_
     void write_xml(MIOFILE&, bool scheduler_rpc);
 #endif
@@ -373,6 +435,10 @@ struct COPROC_ATI : public COPROC {
     COPROC_ATI(): COPROC() {clear();}
     void get(std::vector<std::string>& warnings);
     void get_hip(std::vector<std::string>& warnings);
+    void set_devices(
+        const std::vector<COPROC_ATI>& hip,
+        const std::vector<OPENCL_DEVICE_PROP>& ocl
+    );
     void correlate(
         bool use_all,
         std::vector<int>& ignore_devs

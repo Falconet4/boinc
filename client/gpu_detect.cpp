@@ -221,14 +221,6 @@ void COPROCS::detect_gpus(vector<string> &warnings) {
     catch (...) {
         gpu_warning(warnings, "Caught SIGSEGV in HIP GPU detection");
     }
-    if (ati_gpus.empty()) {
-        try {
-            ati.get(warnings);
-        }
-        catch (...) {
-            gpu_warning(warnings, "Caught SIGSEGV in ATI GPU detection");
-        }
-    }
     try {
         // OpenCL detection must come last
         get_opencl(warnings);
@@ -252,13 +244,6 @@ void COPROCS::detect_gpus(vector<string> &warnings) {
     } else {
         ati.get_hip(warnings);
     }
-    if (ati_gpus.empty()) {
-        if (setjmp(resume)) {
-            gpu_warning(warnings, "Caught SIGSEGV in ATI GPU detection");
-        } else {
-            ati.get(warnings);
-        }
-    }
 #else
     apple_gpu.get(warnings);
 #endif
@@ -270,6 +255,13 @@ void COPROCS::detect_gpus(vector<string> &warnings) {
     }
     signal(SIGSEGV, old_sig);
 #endif
+    ati.set_devices(ati_gpus, ati_opencls);
+    // correlate() copies the chosen instance; keep the per-device list on
+    // every instance so it survives that assignment in the in-process path.
+    //
+    for (unsigned int i=0; i<ati_gpus.size(); i++) {
+        ati_gpus[i].devices = ati.devices;
+    }
 }
 
 // for each GPU type, scan the GPUs we detected
@@ -514,7 +506,37 @@ int COPROCS::write_coproc_info_file(vector<string> &warnings) {
     }
 
     for (i=0; i<ati_gpus.size(); ++i) {
-       ati_gpus[i].write_xml(mf, false);
+        // The per-device list belongs to the aggregate; attach it to each
+        // instance entry so it survives the child-process file round trip
+        // and whichever instance correlate() selects.
+        //
+        ati_gpus[i].devices = ati.devices;
+        ati_gpus[i].write_xml(mf, false);
+    }
+    if (ati_gpus.empty() && !ati.devices.empty() && !ati_opencls.empty()) {
+        // OpenCL-only host: there is no HIP instance to carry the list.
+        // Write one aggregate entry so the parent can parse the devices.
+        //
+        const OPENCL_DEVICE_PROP& o = ati_opencls[0];
+        COPROC_ATI cc;
+        cc.clear();
+        safe_strcpy(cc.name, o.name);
+        cc.count = 1;
+        cc.device_num = o.device_num;
+        cc.have_opencl = true;
+        cc.available_ram = o.global_mem_size;
+        cc.peak_flops = o.peak_flops;
+        cc.peak_flops_dp = o.peak_flops_dp;
+        cc.have_fp64 = o.have_fp64 || (o.double_fp_config != 0);
+        cc.attribs.localRAM = (int)(o.global_mem_size / MEGA);
+        if (o.gfxip_major) {
+            cc.gfx_target_version = o.gfxip_major*10000 + o.gfxip_minor*100;
+            gfx_target_to_string(
+                cc.gfx_target_version, cc.gcn_arch, sizeof(cc.gcn_arch)
+            );
+        }
+        cc.devices = ati.devices;
+        cc.write_xml(mf, false);
     }
     for (i=0; i<nvidia_gpus.size(); ++i) {
         temp = nvidia_gpus[i].count;

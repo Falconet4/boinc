@@ -263,11 +263,13 @@ void COPROC_ATI::correlate(
     bool use_all,
     vector<int>& ignore_devs
 ) {
-    char buf[256];
+    (void)use_all;      // AMD now reports every usable device
 
     if (!ati_gpus.size()) return;
 
-    // find the most capable non-ignored instance
+    // Find the most capable non-ignored instance.  It supplies the
+    // vendor/driver fields; the per-device report and the conservative
+    // aggregate fields below describe the whole pool.
     //
     bool first = true;
     unsigned int i;
@@ -281,45 +283,92 @@ void COPROC_ATI::correlate(
         }
     }
 
-    // see which other instances are equivalent,
-    // and set the "count" and "device_nums" fields
+    // Include every usable instance, not only those equivalent to the
+    // best.  The scheduler can now target a subset by device number.
     //
     count = 0;
+    bool all_fp64 = true, all_hip = true, all_opencl = true;
+    bool arch_common = true;
+    double min_dp = 0, min_avail = 0, min_ocl = 0, max_peak = 0;
+    int min_ram = 0;
+    char common_arch[64];
+    common_arch[0] = 0;
+    bool first_used = true;
+
     for (i=0; i<ati_gpus.size(); i++) {
-        ati_gpus[i].description(buf, sizeof(buf));
-        if (in_vector(ati_gpus[i].device_num, ignore_devs)) {
-            ati_gpus[i].is_used = COPROC_IGNORED;
-        } else if (this->have_opencl && !ati_gpus[i].have_opencl) {
-            ati_gpus[i].is_used = COPROC_UNUSED;
-        } else if (this->have_cal && !ati_gpus[i].have_cal) {
-            ati_gpus[i].is_used = COPROC_UNUSED;
-        } else if (this->have_hip && !ati_gpus[i].have_hip) {
-            ati_gpus[i].is_used = COPROC_UNUSED;
-        } else if (use_all || !ati_compare(ati_gpus[i], *this, true)) {
-            if (count >= MAX_COPROC_INSTANCES) {
-                ati_gpus[i].is_used = COPROC_UNUSED;
-                continue;
-            }
-            device_nums[count] = ati_gpus[i].device_num;
-            count++;
-            ati_gpus[i].is_used = COPROC_USED;
-        } else {
-            ati_gpus[i].is_used = COPROC_UNUSED;
+        COPROC_ATI& d = ati_gpus[i];
+        if (in_vector(d.device_num, ignore_devs)) {
+            d.is_used = COPROC_IGNORED;
+            continue;
         }
+        if (this->have_opencl && !d.have_opencl) {
+            d.is_used = COPROC_UNUSED;
+            continue;
+        }
+        if (this->have_hip && !d.have_hip) {
+            d.is_used = COPROC_UNUSED;
+            continue;
+        }
+        if (count >= MAX_COPROC_INSTANCES) {
+            d.is_used = COPROC_UNUSED;
+            continue;
+        }
+
+        int slot = count;
+        device_nums[slot] = d.device_num;
+        instance_has_opencl[slot] = d.have_opencl;
+        opencl_device_indexes[slot] = d.opencl_prop.opencl_device_index;
+        opencl_device_ids[slot] = d.opencl_prop.device_id;
+        count++;
+        d.is_used = COPROC_USED;
+
+        if (first_used) {
+            safe_strcpy(common_arch, d.gcn_arch);
+            min_dp = d.peak_flops_dp;
+            min_avail = d.available_ram;
+            min_ocl = d.opencl_prop.global_mem_size;
+            min_ram = d.attribs.localRAM;
+            max_peak = d.peak_flops;
+            first_used = false;
+        } else {
+            if (strcmp(common_arch, d.gcn_arch)) arch_common = false;
+            if (d.peak_flops_dp < min_dp) min_dp = d.peak_flops_dp;
+            if (d.available_ram < min_avail) min_avail = d.available_ram;
+            if (d.opencl_prop.global_mem_size
+                && d.opencl_prop.global_mem_size < min_ocl
+            ) {
+                min_ocl = d.opencl_prop.global_mem_size;
+            }
+            if (d.attribs.localRAM < min_ram) min_ram = d.attribs.localRAM;
+            if (d.peak_flops > max_peak) max_peak = d.peak_flops;
+        }
+        if (!d.have_fp64) all_fp64 = false;
+        if (!d.have_hip) all_hip = false;
+        if (!d.have_opencl) all_opencl = false;
     }
+
+    if (!count) return;
+
+    // Conservative summary for old servers (which only see the aggregate),
+    // plus the full device list for the new per-device path.
+    //
+    have_fp64 = all_fp64;
+    peak_flops_dp = all_fp64? min_dp : 0;
+    if (!arch_common) gcn_arch[0] = 0;
+    else safe_strcpy(gcn_arch, common_arch);
+    attribs.localRAM = min_ram;
+    available_ram = min_avail;
+    opencl_prop.global_mem_size = min_ocl;
+    peak_flops = max_peak;
+    have_hip = all_hip;
+    have_opencl = all_opencl;
+    opencl_device_count = count;
 }
 
 void COPROC_ATI::get_hip(vector<string>& warnings) {
     char buf[256];
     string s;
     int n = 0;
-
-    // If CAL already found GPUs we have authoritative device numbers;
-    // don't add a second set of entries for the same hardware.
-    //
-    for (unsigned int i=0; i<ati_gpus.size(); i++) {
-        if (ati_gpus[i].have_cal) return;
-    }
 
     void* lib = load_hip_library();
     if (!lib) {
