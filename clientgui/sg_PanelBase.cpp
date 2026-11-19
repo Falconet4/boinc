@@ -73,7 +73,7 @@ void CSimplePanelBase::MakeBGBitMap() {
     int image_weight = MAX_OPACITY - white_weight;
     if (wxGetApp().GetIsDarkMode()) { // Darken the panel
         white_weight /= 4;
-        white_weight /=4;
+        image_weight = MAX_OPACITY - white_weight;
     }
 
 // Workaround for CSimpleGUIPanel not reliably getting

@@ -343,7 +343,7 @@ int PROJECT::parse(XML_PARSER& xp) {
             continue;
         }
         if (xp.parse_double("project_files_downloaded_time", project_files_downloaded_time)) continue;
-        if (xp.parse_bool("no_ati_pref", rsc_desc_cpu.no_rsc_pref)) continue;
+        if (xp.parse_bool("no_ati_pref", rsc_desc_ati.no_rsc_pref)) continue;
         if (xp.parse_str("venue", venue, sizeof(venue))) continue;
         if (xp.parse_int("njobs_success", njobs_success)) continue;
         if (xp.parse_int("njobs_error", njobs_error)) continue;
@@ -385,6 +385,7 @@ void PROJECT::clear() {
     rsc_desc_nvidia.clear();
     rsc_desc_ati.clear();
     rsc_desc_intel_gpu.clear();
+    rsc_desc_apple_gpu.clear();
     sched_priority = 0;
     duration_correction_factor = 0;
     anonymous_platform = false;

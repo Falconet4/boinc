@@ -52,6 +52,44 @@ ASYNC_RPC_REQUEST::ASYNC_RPC_REQUEST() {
 }
 
 
+// A request is copied into the queue and again into current_rpc_request.
+// Copy the owned argument storage and re-derive the arg pointers from it, so
+// a queued request never points at the original request's (or the caller's)
+// memory.
+//
+ASYNC_RPC_REQUEST::ASYNC_RPC_REQUEST(const ASYNC_RPC_REQUEST& other) {
+    *this = other;
+}
+
+
+ASYNC_RPC_REQUEST& ASYNC_RPC_REQUEST::operator=(const ASYNC_RPC_REQUEST& other) {
+    if (this == &other) return *this;
+    which_rpc = other.which_rpc;
+    exchangeBuf = other.exchangeBuf;
+    rpcType = other.rpcType;
+    completionTime = other.completionTime;
+    RPCExecutionTime = other.RPCExecutionTime;
+    resultPtr = other.resultPtr;
+    retval = other.retval;
+    isActive = other.isActive;
+    owned_str1 = other.owned_str1;
+    owned_str2 = other.owned_str2;
+    owned_str3 = other.owned_str3;
+    owned_str4 = other.owned_str4;
+    owned_int1 = other.owned_int1;
+    owned_double1 = other.owned_double1;
+    owned_bool1 = other.owned_bool1;
+    // keep the pointers as-is for the RPCs whose args are caller buffers,
+    // then re-point the ones we own
+    arg1 = other.arg1;
+    arg2 = other.arg2;
+    arg3 = other.arg3;
+    arg4 = other.arg4;
+    repoint();
+    return *this;
+}
+
+
 ASYNC_RPC_REQUEST::~ASYNC_RPC_REQUEST() {
     clear();
 }
@@ -70,21 +108,110 @@ void ASYNC_RPC_REQUEST::clear() {
     resultPtr = NULL;
     retval = 0;
     isActive = false;
+    owned_str1.clear();
+    owned_str2.clear();
+    owned_str3.clear();
+    owned_str4.clear();
+    owned_int1 = 0;
+    owned_double1 = 0;
+    owned_bool1 = false;
+}
+
+
+// Point arg1..arg4 at the owned storage for the RPCs that take values.  For
+// every other RPC the args are caller buffers that are valid until the call
+// returns (the caller waits), so their pointers are left alone.
+//
+void ASYNC_RPC_REQUEST::repoint() {
+    switch (which_rpc) {
+    case RPC_AUTHORIZE:
+        arg1 = (void*)owned_str1.c_str();
+        break;
+    case RPC_EXCHANGE_VERSIONS:     // arg2 is the caller's output struct
+    case RPC_GET_PROJECT_CONFIG:
+        arg1 = (void*)&owned_str1;
+        break;
+    case RPC_PROJECT_ATTACH:
+        arg1 = (void*)owned_str1.c_str();
+        arg2 = (void*)owned_str2.c_str();
+        arg3 = (void*)owned_str3.c_str();
+        arg4 = (void*)owned_str4.c_str();
+        break;
+    case RPC_ACCT_MGR_RPC:
+        arg1 = (void*)owned_str1.c_str();
+        arg2 = (void*)owned_str2.c_str();
+        arg3 = (void*)owned_str3.c_str();
+        arg4 = (void*)&owned_bool1;
+        break;
+    case RPC_SET_RUN_MODE:
+    case RPC_SET_GPU_MODE:
+    case RPC_SET_NETWORK_MODE:
+        arg1 = (void*)&owned_int1;
+        arg2 = (void*)&owned_double1;
+        break;
+    default:
+        break;
+    }
 }
 
 
 bool ASYNC_RPC_REQUEST::isSameAs(ASYNC_RPC_REQUEST& otherRequest) {
     if (which_rpc != otherRequest.which_rpc) return false;
-    if (arg1 != otherRequest.arg1) return false;
+
+    // For the requests that own their arguments, compare the values: each
+    // copy now has its own storage, so comparing arg pointers would never
+    // report a duplicate.
+    //
+    switch (which_rpc) {
+    case RPC_AUTHORIZE:
+        if (owned_str1 != otherRequest.owned_str1) return false;
+        break;
+    case RPC_EXCHANGE_VERSIONS:
+        if (owned_str1 != otherRequest.owned_str1) return false;
+        if (arg2 != otherRequest.arg2) return false;
+        break;
+    case RPC_GET_PROJECT_CONFIG:
+        if (owned_str1 != otherRequest.owned_str1) return false;
+        break;
+    case RPC_PROJECT_ATTACH:
+        if (owned_str1 != otherRequest.owned_str1) return false;
+        if (owned_str2 != otherRequest.owned_str2) return false;
+        if (owned_str3 != otherRequest.owned_str3) return false;
+        if (owned_str4 != otherRequest.owned_str4) return false;
+        break;
+    case RPC_ACCT_MGR_RPC:
+        if (owned_str1 != otherRequest.owned_str1) return false;
+        if (owned_str2 != otherRequest.owned_str2) return false;
+        if (owned_str3 != otherRequest.owned_str3) return false;
+        if (owned_bool1 != otherRequest.owned_bool1) return false;
+        break;
+    case RPC_SET_RUN_MODE:
+    case RPC_SET_GPU_MODE:
+    case RPC_SET_NETWORK_MODE:
+        if (owned_int1 != otherRequest.owned_int1) return false;
+        if (owned_double1 != otherRequest.owned_double1) return false;
+        break;
+    default:
+        if (arg1 != otherRequest.arg1) return false;
+        if (arg2 != otherRequest.arg2) return false;
+        if (arg3 != otherRequest.arg3) return false;
+        if (arg4 != otherRequest.arg4) return false;
+        break;
+    }
+
     if (exchangeBuf != otherRequest.exchangeBuf) return false;
-    if (arg2 != otherRequest.arg2) return false;
-    if (arg3 != otherRequest.arg3) return false;
-    if (arg4 != otherRequest.arg4) return false;
     if (rpcType != otherRequest.rpcType) return false;
     if (completionTime != otherRequest.completionTime) return false;
     if (resultPtr != otherRequest.resultPtr) return false;
     // OK if isActive and retval don't match.
     return true;
+}
+
+
+int AsyncRPC::RPC_Wait_Owned(ASYNC_RPC_REQUEST& request) {
+    request.rpcType = RPC_TYPE_WAIT_FOR_COMPLETION;
+    request.repoint();
+    return m_pDoc->RequestRPC(request, false);
 }
 
 
@@ -600,7 +727,11 @@ int CMainDocument::RequestRPC(ASYNC_RPC_REQUEST& request, bool hasPriority) {
 
             // OnRPCComplete() clears m_bWaitingForRPC and deletes m_RPCWaitDlg if RPC completed
             if (! m_bWaitingForRPC) {
-                return current_rpc_request.retval;
+                // HandleCompletedRPC() has already cleared (and possibly
+                // replaced) current_rpc_request by now, so return the value
+                // it saved.
+                //
+                return m_iLastCompletedRPCResult;
             }
 
 #if wxDEBUG_LEVEL
@@ -652,7 +783,11 @@ int CMainDocument::RequestRPC(ASYNC_RPC_REQUEST& request, bool hasPriority) {
             response = m_RPCWaitDlg->ShowModal();
             // Remember time the dialog was closed for use by RunPeriodicRPCs()
             m_dtLasAsyncRPCDlgTime = wxDateTime::Now();
-            if (response != wxID_OK) {
+            if (response == wxID_OK) {
+                // The RPC completed while the dialog was up; report its
+                // result, not the dialog's return code.
+                retval = m_iLastCompletedRPCResult;
+            } else {
                 // TODO: If user presses Cancel in Please Wait dialog but request
                 // has not yet been started, should we just remove it from queue?
                 // If we make that change, should we also add a separate menu item
@@ -988,6 +1123,7 @@ void CMainDocument::HandleCompletedRPC() {
         }
     }
 
+    m_iLastCompletedRPCResult = retval;
     current_rpc_request.clear();
 
     // Start the next RPC request.

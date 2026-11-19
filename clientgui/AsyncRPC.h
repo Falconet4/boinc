@@ -18,6 +18,8 @@
 #ifndef BOINC_ASYNCRPC_H
 #define BOINC_ASYNCRPC_H
 
+#include <string>
+
 #ifndef __WXMAC__
 
 #define BOINC_Condition wxCondition
@@ -197,10 +199,26 @@ struct ASYNC_RPC_REQUEST {
     int retval;
     bool isActive;
 
+    // Owned copies of the arguments the RPC thread reads.  A request is
+    // copied into the queue and again into CMainDocument::current_rpc_request,
+    // so a raw pointer to the caller's stack frame - or, as before, to a
+    // shared function-local static - would be read after the call returned or
+    // be overwritten by the next call of the same type.  These members are
+    // copied with the request and repoint() re-derives arg1..arg4 from them
+    // after every copy, so each queued request owns its own arguments.
+    //
+    std::string owned_str1, owned_str2, owned_str3, owned_str4;
+    int         owned_int1;
+    double      owned_double1;
+    bool        owned_bool1;
+
     ASYNC_RPC_REQUEST();
+    ASYNC_RPC_REQUEST(const ASYNC_RPC_REQUEST& other);
+    ASYNC_RPC_REQUEST& operator=(const ASYNC_RPC_REQUEST& other);
     ~ASYNC_RPC_REQUEST();
 
     void                        clear();
+    void                        repoint();
     bool                        isSameAs(ASYNC_RPC_REQUEST& otherRequest);
 };
 
@@ -217,13 +235,37 @@ public:
             bool hasPriority = false
     );
 
+    // Queue a request that carries its own argument copies.  The caller fills
+    // the owned_* fields and which_rpc; repoint() then derives arg1..arg4, and
+    // every copy of the request re-derives them, so nothing points at the
+    // caller's stack or at shared static storage.
+    //
+    int RPC_Wait_Owned(ASYNC_RPC_REQUEST& request);
+
+    int set_mode(RPC_SELECTOR which_rpc, int mode, double duration) {
+        ASYNC_RPC_REQUEST req;
+        req.which_rpc = which_rpc;
+        req.owned_int1 = mode;
+        req.owned_double1 = duration;
+        return RPC_Wait_Owned(req);
+    }
+
     // Manager must do all RPC data transfers through AsyncRPC calls, so
     // this class must have methods corresponding to all RPC_CLIENT data
     // transfer operations, but NOT init(), init_async(), close(), etc.
-    int authorize(const char* passwd)
-            { return RPC_Wait(RPC_AUTHORIZE, (void*)passwd); }
-    int exchange_versions(std::string client_name, VERSION_INFO& server)
-            { return RPC_Wait(RPC_EXCHANGE_VERSIONS, (void*)&client_name, (void*)&server); }
+    int authorize(const char* passwd) {
+        ASYNC_RPC_REQUEST req;
+        req.which_rpc = RPC_AUTHORIZE;
+        req.owned_str1 = passwd ? passwd : "";
+        return RPC_Wait_Owned(req);
+    }
+    int exchange_versions(std::string client_name, VERSION_INFO& server) {
+        ASYNC_RPC_REQUEST req;
+        req.which_rpc = RPC_EXCHANGE_VERSIONS;
+        req.owned_str1 = client_name;
+        req.arg2 = (void*)&server;      // output; the caller is waiting for it
+        return RPC_Wait_Owned(req);
+    }
     int get_state(CC_STATE& arg1)
             { return RPC_Wait(RPC_GET_STATE, (void*)&arg1); }
     int get_results(RESULTS& arg1, bool& arg2)
@@ -244,15 +286,18 @@ public:
             { return RPC_Wait(RPC_GET_DISK_USAGE, (void*)&arg1); }
     int project_op(PROJECT& arg1, const char* op)
             { return RPC_Wait(RPC_PROJECT_OP, (void*)&arg1, (void*)op); }
-    int set_run_mode(int mode, double duration)
-            { return RPC_Wait(RPC_SET_RUN_MODE, (void*)&mode, (void*)&duration); }
+    int set_run_mode(int mode, double duration) {
+        return set_mode(RPC_SET_RUN_MODE, mode, duration);
+    }
         // if duration is zero, change is permanent.
         // otherwise, after duration expires,
         // restore last permanent mode
-    int set_gpu_mode(int mode, double duration)
-            { return RPC_Wait(RPC_SET_GPU_MODE, (void*)&mode, (void*)&duration); }
-    int set_network_mode(int mode, double duration)
-            { return RPC_Wait(RPC_SET_NETWORK_MODE, (void*)&mode, (void*)&duration); }
+    int set_gpu_mode(int mode, double duration) {
+        return set_mode(RPC_SET_GPU_MODE, mode, duration);
+    }
+    int set_network_mode(int mode, double duration) {
+        return set_mode(RPC_SET_NETWORK_MODE, mode, duration);
+    }
     int get_screensaver_tasks(int& suspend_reason, RESULTS& rbuf) {
         return RPC_Wait(
             RPC_GET_SCREENSAVER_TASKS, (void*)&suspend_reason, (void*)&rbuf
@@ -264,10 +309,6 @@ public:
             { return RPC_Wait(RPC_SET_PROXY_SETTINGS, (void*)&arg1); }
     int get_proxy_settings(GR_PROXY_INFO& arg1)
             { return RPC_Wait(RPC_GET_PROXY_SETTINGS, (void*)&arg1); }
-    int get_messages(int seqno, MESSAGES& arg1)
-            { return RPC_Wait(RPC_GET_MESSAGES, (void*)&seqno, (void*)&arg1); }
-    int get_notices(int seqno, NOTICES& arg1)
-            { return RPC_Wait(RPC_GET_NOTICES, (void*)&seqno, (void*)&arg1); }
     int file_transfer_op(FILE_TRANSFER& arg1, const char* op)
             { return RPC_Wait(RPC_FILE_TRANSFER_OP, (void*)&arg1, (void*)op); }
     int result_op(RESULT& arg1, const char* op)
@@ -290,8 +331,12 @@ public:
     // call the second one periodically until it returns zero.
     // TODO: do project update
     //
-    int get_project_config(std::string url)
-            { return RPC_Wait(RPC_GET_PROJECT_CONFIG, (void*)&url); }
+    int get_project_config(std::string url) {
+        ASYNC_RPC_REQUEST req;
+        req.which_rpc = RPC_GET_PROJECT_CONFIG;
+        req.owned_str1 = url;
+        return RPC_Wait_Owned(req);
+    }
     int get_project_config_poll(PROJECT_CONFIG& arg1)
             { return RPC_Wait(RPC_GET_PROJECT_CONFIG_POLL, (void*)&arg1); }
     int lookup_account(ACCOUNT_IN& arg1)
@@ -305,9 +350,13 @@ public:
     int project_attach(
         const char* url, const char* auth, const char* project_name, const char* email_addr
     ) {
-        return RPC_Wait(
-            RPC_PROJECT_ATTACH, (void*)url, (void*)auth, (void*)project_name, (void*)email_addr
-        );
+        ASYNC_RPC_REQUEST req;
+        req.which_rpc = RPC_PROJECT_ATTACH;
+        req.owned_str1 = url ? url : "";
+        req.owned_str2 = auth ? auth : "";
+        req.owned_str3 = project_name ? project_name : "";
+        req.owned_str4 = email_addr ? email_addr : "";
+        return RPC_Wait_Owned(req);
     }
     int project_attach_from_file()
             { return RPC_Wait(RPC_PROJECT_ATTACH_FROM_FILE); }
@@ -316,7 +365,15 @@ public:
     int acct_mgr_rpc(
         const char* url, const char* name, const char* passwd,
         bool use_config_file=false
-    )       { return RPC_Wait(RPC_ACCT_MGR_RPC, (void*)url, (void*)name, (void*)passwd, (void*)use_config_file); }
+    ) {
+        ASYNC_RPC_REQUEST req;
+        req.which_rpc = RPC_ACCT_MGR_RPC;
+        req.owned_str1 = url ? url : "";
+        req.owned_str2 = name ? name : "";
+        req.owned_str3 = passwd ? passwd : "";
+        req.owned_bool1 = use_config_file;
+        return RPC_Wait_Owned(req);
+    }
     int acct_mgr_rpc_poll(ACCT_MGR_RPC_REPLY& arg1)
             { return RPC_Wait(RPC_ACCT_MGR_RPC_POLL, (void*)&arg1); }
 
