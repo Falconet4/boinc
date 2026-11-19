@@ -333,19 +333,6 @@ void device_json(char* buf, size_t len, const GPU_DEVICE& d) {
     );
 }
 
-// Append the per-device list of a vendor as JSON array elements.
-//
-static void append_devices(
-    string& out, const std::vector<GPU_DEVICE>& devices
-) {
-    char buf[8192];
-    for (unsigned int i=0; i<devices.size(); i++) {
-        if (!out.empty()) out += ",\n";
-        device_json(buf, sizeof(buf), devices[i]);
-        out += buf;
-    }
-}
-
 static void ati_device_json(char* buf, size_t len, const COPROC_ATI_DEVICE& d) {
     char ename[4096], earch[4096];
     json_escape_string(d.name, ename, sizeof(ename));
@@ -371,17 +358,39 @@ static void ati_device_json(char* buf, size_t len, const COPROC_ATI_DEVICE& d) {
     );
 }
 
+// host.misc is a BLOB_SIZE (64K) text field.  Keep the device array well
+// under it; truncating mid-object would produce invalid JSON, so stop
+// adding whole entries once the bound is reached.
+//
+#define MAX_DEVICES_JSON 48000
+
 void COPROCS::devices_string_json(string& out) {
     out = "";
     char buf[8192];
     for (unsigned int i=0; i<ati.devices.size(); i++) {
-        if (!out.empty()) out += ",\n";
+        if (out.size() > MAX_DEVICES_JSON) return;
         ati_device_json(buf, sizeof(buf), ati.devices[i]);
+        if (!out.empty()) out += ",\n";
         out += buf;
     }
-    append_devices(out, nvidia.devices);
-    append_devices(out, intel_gpu.devices);
-    append_devices(out, apple_gpu.devices);
+    for (unsigned int i=0; i<nvidia.devices.size(); i++) {
+        if (out.size() > MAX_DEVICES_JSON) return;
+        device_json(buf, sizeof(buf), nvidia.devices[i]);
+        if (!out.empty()) out += ",\n";
+        out += buf;
+    }
+    for (unsigned int i=0; i<intel_gpu.devices.size(); i++) {
+        if (out.size() > MAX_DEVICES_JSON) return;
+        device_json(buf, sizeof(buf), intel_gpu.devices[i]);
+        if (!out.empty()) out += ",\n";
+        out += buf;
+    }
+    for (unsigned int i=0; i<apple_gpu.devices.size(); i++) {
+        if (out.size() > MAX_DEVICES_JSON) return;
+        device_json(buf, sizeof(buf), apple_gpu.devices[i]);
+        if (!out.empty()) out += ",\n";
+        out += buf;
+    }
 }
 
 void COPROCS::summary_string_json(string &out) {
