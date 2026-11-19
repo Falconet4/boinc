@@ -366,6 +366,7 @@ int CC_CONFIG::parse_options_client(XML_PARSER& xp) {
                 );
                 continue;
             }
+            c.specified_in_config = true;
             retval = config_coprocs.add(c);
             if (retval) {
                 msg_printf_notice(NULL, false, NULL,

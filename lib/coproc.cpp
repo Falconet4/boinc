@@ -146,6 +146,26 @@ int COPROC::parse(XML_PARSER& xp) {
             opencl_prop.parse(xp, "/coproc_opencl");
             continue;
         }
+        // Per-device entries are accepted on a generic COPROC so a
+        // cc_config.xml <coproc> can describe devices; they are parsed
+        // but only the vendor-specific types act on them.
+        //
+        if (xp.match_tag("device")) {
+            GPU_DEVICE d;
+            while (!xp.get_tag()) {
+                if (xp.match_tag("/device")) break;
+                if (xp.parse_str("name", d.name, sizeof(d.name))) continue;
+                if (xp.parse_int("device_num", d.device_num)) continue;
+                if (xp.parse_bool("have_fp64", d.have_fp64)) continue;
+                if (xp.parse_double("peak_flops", d.peak_flops)) continue;
+                if (xp.parse_double("peak_flops_dp", d.peak_flops_dp)) continue;
+                if (xp.parse_double("total_ram", d.total_ram)) continue;
+            }
+            if (devices.size() < MAX_COPROC_INSTANCES) {
+                devices.push_back(d);
+            }
+            continue;
+        }
         if (xp.parse_str("type", type, sizeof(type))) continue;
         if (xp.parse_int("count", count)) continue;
         if (xp.parse_double("req_secs", req_secs)) continue;
@@ -483,6 +503,43 @@ void COPROC::check_count(const char* ctype) {
     }
 }
 
+// Copy a coproc that arrived in the generic <coproc> form into the vendor
+// member the rest of the code reads, but only when that member is empty so
+// a vendor-specific tag elsewhere in the document still wins.
+//
+static void promote_generic_to_ati(COPROC& src, COPROC_ATI& dst) {
+    static_cast<COPROC&>(dst) = src;
+    dst.devices.clear();
+    for (unsigned int i=0; i<src.devices.size(); i++) {
+        const GPU_DEVICE& g = src.devices[i];
+        COPROC_ATI_DEVICE d;
+        safe_strcpy(d.name, g.name);
+        d.device_num = g.device_num;
+        d.have_fp64 = g.have_fp64;
+        d.peak_flops = g.peak_flops;
+        d.peak_flops_dp = g.peak_flops_dp;
+        d.total_ram = g.total_ram;
+        dst.devices.push_back(d);
+    }
+}
+
+void COPROCS::promote_generic(COPROC& cp) {
+    switch (coproc_type_name_to_num(cp.type)) {
+    case PROC_TYPE_NVIDIA_GPU:
+        if (!nvidia.count) static_cast<COPROC&>(nvidia) = cp;
+        break;
+    case PROC_TYPE_AMD_GPU:
+        if (!ati.count) promote_generic_to_ati(cp, ati);
+        break;
+    case PROC_TYPE_INTEL_GPU:
+        if (!intel_gpu.count) static_cast<COPROC&>(intel_gpu) = cp;
+        break;
+    case PROC_TYPE_APPLE_GPU:
+        if (!apple_gpu.count) static_cast<COPROC&>(apple_gpu) = cp;
+        break;
+    }
+}
+
 int COPROCS::parse(XML_PARSER& xp) {
     int retval;
 
@@ -549,6 +606,12 @@ int COPROCS::parse(XML_PARSER& xp) {
                 if (n_rsc < MAX_RSC) {
                     coprocs[n_rsc++] = cp;
                 }
+                // A GPU reported in the generic form describes a vendor
+                // the rest of the code reaches through the vendor member.
+                // Mirror it in, keeping any data already parsed from a
+                // vendor-specific tag.
+                //
+                promote_generic(cp);
             }
         }
     }

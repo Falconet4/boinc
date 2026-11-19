@@ -67,6 +67,7 @@
 #include "shmem.h"
 
 #include "client_state.h"
+#include "coproc_sched.h"
 
 using std::max;
 
@@ -2508,6 +2509,21 @@ void CLIENT_STATE::init_result_resource_usage(PROJECT *p) {
             msg_printf(rp->project, MSG_INFO,
                 "Missing coprocessor for task %s", rp->name
             );
+        }
+
+        // The scheduler can restrict a task to a subset of this host's
+        // GPUs.  If none of those devices exist here - a GPU was removed,
+        // or a driver update, hotplug or a new card renumbered them - the
+        // task can never run.  Abort it so the project can issue a
+        // replacement, rather than leaving it to expire.
+        //
+        if (!rp->running() && gpu_device_mask_unsatisfiable(rp)) {
+            msg_printf(rp->project, MSG_INFO,
+                "Task %s requires GPU device %s, which this computer doesn't "
+                "have; aborting",
+                rp->name, gpu_allowed_devices_string(rp).c_str()
+            );
+            rp->abort_inactive(EXIT_MISSING_COPROC);
         }
     }
 }

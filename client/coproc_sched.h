@@ -17,11 +17,21 @@
 
 // stuff related to scheduling coprocessors
 
+#include <string>
 #include <vector>
 
 struct RESULT;
 
 extern void assign_coprocs(std::vector<RESULT*>& jobs);
+
+// True when the scheduler restricted a task to GPU devices this host
+// doesn't have, so it can never run here.
+//
+extern bool gpu_device_mask_unsatisfiable(RESULT*);
+
+// The allowed device numbers as text, for user-facing messages.
+//
+extern std::string gpu_allowed_devices_string(RESULT*);
 
 // The resources (proc and mem) used by running sporadic jobs.
 // We recompute these on each poll, since e.g. WSS can change.
