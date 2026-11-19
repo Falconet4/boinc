@@ -245,11 +245,17 @@ class SqlQueryString {
         } else {
             $this->table = "";
         }
+        // The table name is interpolated into every query this class builds,
+        // so restrict it to an identifier.  Anything else - an injected subquery,
+        // a space, a quote - cannot come from a real table name.
+        //
+        if ($this->table != "" && !preg_match('/^[A-Za-z0-9_]+$/', $this->table)) {
+            error_page("bad table name");
+        }
         $this->query = "";
         $this->urlquery = "";
     }
     function add($clause) {
-        //$clause=boinc_real_escape_string($clause);
         if (!$this->query) {
             $this->query .= "where $clause";
         } else {
@@ -258,7 +264,16 @@ class SqlQueryString {
     }
     function addclause($clause) {
         if ($clause) {
+            // $clause is a raw SQL fragment typed into the ops form, so it
+            // cannot be escaped - that is the feature.  Narrow what it can
+            // contain instead.  The check must run on the *decoded* text:
+            // PHP has already decoded $_GET once, so a second urldecode()
+            // here would turn %27 back into a quote after the check.
+            //
             $c = urldecode($clause);
+            if (preg_match("/['\"`;]|--|\\/\\*|#/", $c)) {
+                error_page("bad clause");
+            }
             $this->add("( $c )");
             $clause = urlencode($clause);
             $this->urlquery .= "&clauses=$clause";
@@ -271,7 +286,7 @@ class SqlQueryString {
             $value = "";
         }
         if (strlen($value)) {
-            $this->add("$name = '$value'");
+            $this->add("$name = '".boinc_real_escape_string($value)."'");
             $this->urlquery .= "&$name=".urlencode($value);
         }
     }
@@ -286,7 +301,7 @@ class SqlQueryString {
         // This means that we enter no condition for this case.
         //
         if (strlen($value) && strcmp("CHOOSE_ALL", $value)) {
-            $this->add("$name = '$value'");
+            $this->add("$name = '".boinc_real_escape_string($value)."'");
             $this->urlquery .= "&$name=".urlencode($value);
         }
     }
@@ -297,7 +312,7 @@ class SqlQueryString {
             $value = '';
         }
         if (strlen($value) && $value > 0) {
-            $this->add("$name > '$value'");
+            $this->add("$name > '".boinc_real_escape_string($value)."'");
             $this->urlquery .= "&$name=".urlencode($value);
         }
     }
@@ -312,7 +327,10 @@ class SqlQueryString {
         } else {
              $order = null;
         }
-        if ($value) {
+        // The sort column goes into the statement as an identifier, so escape
+        // cannot help; allow only a plain column name.
+        //
+        if ($value && preg_match('/^[A-Za-z0-9_]+$/', $value)) {
             if ($order == 'asc') {
                 $this->query .= " order by $value asc";
                 $this->urlquery .= "&sort_by_order=".urlencode($order);

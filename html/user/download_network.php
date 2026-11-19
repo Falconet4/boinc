@@ -39,6 +39,11 @@ If this is not enough you should contact the author.").
     </ul>
 ";
 
+// The body is meant to be HTML - it is a fragment of the BOINC add-ons page -
+// so it cannot be escaped without breaking the page.  The fetch is a fixed
+// https URL, so the exposure is only a compromise of that host, not of this
+// project.  Note it plainly rather than escaping it.
+//
 $cached = get_cached_data(3600);
 $httpFile = $cached ? unserialize($cached) : false;
 if (!$httpFile) {

@@ -57,7 +57,9 @@ function col_title($is_team, $app, $appid, $is_total, $i) {
 function show_header($is_team, $apps, $appid, $is_total) {
     echo "<tr><th colspan=2>&nbsp;</th>";
     foreach ($apps as $app) {
-        echo "<th colspan=2 class=\"text-center\">$app->name</th>\n";
+        // App names are project-supplied; escape them.
+        echo "<th colspan=2 class=\"text-center\">"
+            . htmlspecialchars($app->name) . "</th>\n";
     }
     echo "</tr>";
 

@@ -25,6 +25,13 @@
 require_once("../inc/util.inc");
 require_once("../inc/xml.inc");
 
+// The reply is XML, so escape with the XML entity set rather than the HTML
+// one.  Only the string fields need it; the rest are integers.
+//
+function xml_escape_inline($x) {
+    return htmlspecialchars((string)$x, ENT_QUOTES | ENT_XML1);
+}
+
 function result_xml($r) {
     echo "
     <result>
@@ -39,7 +46,7 @@ function result_xml($r) {
         <report_deadline>$r->report_deadline</report_deadline>
         <sent_time>$r->sent_time</sent_time>
         <received_time>$r->received_time</received_time>
-        <name>$r->name</name>
+        <name>".xml_escape_inline($r->name)."</name>
         <cpu_time>$r->cpu_time</cpu_time>
         <batch>$r->batch</batch>
         <file_delete_state>$r->file_delete_state</file_delete_state>
@@ -69,7 +76,7 @@ if ($ids) {
         if ($result) {
             result_xml($result);
         } else {
-            echo "<error>ID $id unknown</error>\n";
+            echo "<error>ID ".xml_escape_inline($id)." unknown</error>\n";
         }
     }
 } else {
@@ -80,7 +87,7 @@ if ($ids) {
         if ($result) {
             result_xml($result);
         } else {
-            echo "<error>name $name unknown</error>\n";
+            echo "<error>name ".xml_escape_inline($name)." unknown</error>\n";
         }
     }
 }

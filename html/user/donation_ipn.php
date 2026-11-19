@@ -34,16 +34,19 @@ $header .= "Content-Length: " . strlen($req) . "\r\n\r\n";
 $fp = fsockopen ('www.paypal.com', 80, $errno, $errstr, 30);
 
 // assign posted variables to local variables
-$item_name = $_POST['item_name'];
+// Escape as they are read: every one of these is interpolated into a
+// single-quoted SQL literal below.
+//
+$item_name = _mysql_escape_string($_POST['item_name']);
 $item_number = $_POST['item_number'];
-$payment_status = $_POST['payment_status'];
-$payment_amount = $_POST['mc_gross'];
-$payment_fee = $_POST['mc_fee'];
-$payment_currency = $_POST['mc_currency'];
-$txn_id = $_POST['txn_id'];
-$receiver_email = $_POST['receiver_email'];
-$payer_email = $_POST['payer_email'];
-$payer_name = $_POST['first_name']." ".$_POST['last_name'];
+$payment_status = _mysql_escape_string($_POST['payment_status']);
+$payment_amount = _mysql_escape_string($_POST['mc_gross']);
+$payment_fee = _mysql_escape_string($_POST['mc_fee']);
+$payment_currency = _mysql_escape_string($_POST['mc_currency']);
+$txn_id = _mysql_escape_string($_POST['txn_id']);
+$receiver_email = _mysql_escape_string($_POST['receiver_email']);
+$payer_email = _mysql_escape_string($_POST['payer_email']);
+$payer_name = _mysql_escape_string($_POST['first_name']." ".$_POST['last_name']);
 $ip = $_SERVER['REMOTE_ADDR'];
 $agent = strtolower($_SERVER[HTTP_USER_AGENT]);
 

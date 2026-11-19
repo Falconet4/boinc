@@ -248,7 +248,11 @@ function show_profile($user, $logged_in_user, $screen_mode = false) {
     //
     BoincForumPrefs::lookup($logged_in_user);
     $options = get_output_options($logged_in_user);
-    $options->htmlitems = false;
+    // Do not disable htmlitems: it is the flag that makes output_transform()
+    // run htmlspecialchars() (see text_transform.inc).  Overriding it to false
+    // rendered profile responses as raw HTML, i.e. stored XSS from any user's
+    // profile.  The forum-prefs path already sets the per-user options.
+    //
 
     if (!empty($profile->response1)) {
         row1(show_profile_heading1());
