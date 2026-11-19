@@ -32,8 +32,8 @@
 // #define MAX_WU_RESULTS       100
 //
 // ------ Default Plan Class Parameters --------------
-// #define ATI_MIN_RAM                  256*MEGA
-// #define OPENCL_ATI_MIN_RAM           256*MEGA
+// #define AMD_MIN_RAM                  256*MEGA
+// #define OPENCL_AMD_MIN_RAM           256*MEGA
 // #define CUDA_MIN_RAM                 256*MEGA
 // #define CUDAFERMI_MIN_RAM            384*MEGA
 // #define OPENCL_NVIDIA_MIN_RAM        384*MEGA

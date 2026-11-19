@@ -327,7 +327,7 @@ void CDlgItemProperties::renderInfos(PROJECT* project_in) {
                 project->rsc_desc_nvidia
             );
         }
-        if (pDoc->state.host_info.coprocs.have_ati()) {
+        if (pDoc->state.host_info.coprocs.have_amd()) {
             show_rsc(
                 wxString(proc_type_name(PROC_TYPE_AMD_GPU), wxConvUTF8),
                 project->rsc_desc_ati

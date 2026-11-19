@@ -27,5 +27,5 @@
 
 #include "coproc.h"
 
-void COPROC_ATI::get(std::vector<std::string>&) {
+void COPROC_AMD::get(std::vector<std::string>&) {
 }

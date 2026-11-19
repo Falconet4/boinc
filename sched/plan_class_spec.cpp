@@ -252,8 +252,8 @@ bool PLAN_CLASS_SPEC::check_wsl_gpu(SCHEDULER_REQUEST& sreq, string gpu_name) {
 // If so, return the resource usage and estimated FLOPS in hu.
 //
 static bool amd_select_devices(
-    const PLAN_CLASS_SPEC& spec, const COPROC_ATI& cp, HOST_USAGE& hu,
-    COPROC_ATI& cp_dev, COPROC_ATI_DEVICE& best, double& gpu_ram_min,
+    const PLAN_CLASS_SPEC& spec, const COPROC_AMD& cp, HOST_USAGE& hu,
+    COPROC_AMD& cp_dev, COPROC_AMD_DEVICE& best, double& gpu_ram_min,
     bool& per_device
 ) {
     per_device = !cp.devices.empty();
@@ -289,7 +289,7 @@ static bool amd_select_devices(
     cp_dev.have_fp64 = best.have_fp64;
     cp_dev.peak_flops = best.peak_flops;
     cp_dev.peak_flops_dp = best.peak_flops_dp;
-    cp_dev.attribs.localRAM = (int)(gpu_ram_min / MEGA);
+    cp_dev.total_ram = gpu_ram_min;
     cp_dev.opencl_prop.global_mem_size = gpu_ram_min;
     cp_dev.available_ram = gpu_ram_min;
     return true;
@@ -330,8 +330,8 @@ bool PLAN_CLASS_SPEC::check(
     SCHEDULER_REQUEST& sreq, HOST_USAGE& hu, const WORKUNIT* wu
 ) {
     COPROC* cpp = NULL;
-    COPROC_ATI cp_dev;
-    COPROC_ATI_DEVICE best_dev;
+    COPROC_AMD cp_dev;
+    COPROC_AMD_DEVICE best_dev;
     COPROC_NVIDIA cp_dev_n;
     COPROC_INTEL cp_dev_i;
     COPROC_APPLE cp_dev_a;
@@ -775,7 +775,7 @@ bool PLAN_CLASS_SPEC::check(
     // AMD
     //
     if (!strcmp(gpu_type, "amd") || !strcmp(gpu_type, "ati")) {
-        COPROC_ATI& cp = sreq.coprocs.ati;
+        COPROC_AMD& cp = sreq.coprocs.amd;
         per_device = !cp.devices.empty();
 
         cpp = &cp;
@@ -809,36 +809,9 @@ bool PLAN_CLASS_SPEC::check(
             gpu_requirements[PROC_TYPE_AMD_GPU].update(abs(min_driver_version), 0);
         }
 
-        if (need_ati_libs) {
-            if (!cp.atirt_detected) {
-                if (config.debug_version_select) {
-                    log_messages.printf(MSG_NORMAL,
-                        "[version] plan_class_spec: ATI libraries not found\n"
-                    );
-                }
-                return false;
-            }
-        } else {
-            if (need_amd_libs && !cp.amdrt_detected) {
-                if (config.debug_version_select) {
-                    log_messages.printf(MSG_NORMAL,
-                        "[version] plan_class_spec: AMD libraries not found\n"
-                    );
-                }
-                return false;
-            }
-        }
-
-        if (without_opencl) {
-            if (cp.have_opencl) {
-                if (config.debug_version_select) {
-                    log_messages.printf(MSG_NORMAL,
-                        "[version] plan_class_spec: OpenCL detected. Plan restricted to CAL only GPUs\n"
-                    );
-                }
-                return false;
-            }
-        }
+        // The CAL runtime presence checks are gone with CAL.  The options
+        // are still parsed above so an old plan class loads, and ignored.
+        //
 
         if (min_amd_simd_width
             && (int)cp.opencl_prop.amd_simd_width < min_amd_simd_width
@@ -852,24 +825,6 @@ bool PLAN_CLASS_SPEC::check(
             return false;
         }
 
-        if (min_cal_target && cp.attribs.target < min_cal_target) {
-            if (config.debug_version_select) {
-                log_messages.printf(MSG_NORMAL,
-                    "[version] plan_class_spec: CAL target less than minimum (%d < %d)\n",
-                    cp.attribs.target, min_cal_target
-                );
-            }
-            return false;
-        }
-        if (max_cal_target && cp.attribs.target > max_cal_target) {
-            if (config.debug_version_select) {
-                log_messages.printf(MSG_NORMAL,
-                    "[version] plan_class_spec: CAL target greater than maximum (%d > %d)\n",
-                    cp.attribs.target, max_cal_target
-                );
-            }
-            return false;
-        }
 
         if (cp.bad_gpu_peak_flops("AMD", msg)) {
             log_messages.printf(MSG_NORMAL, "%s\n", msg.c_str());
@@ -879,38 +834,17 @@ bool PLAN_CLASS_SPEC::check(
         } else {
             gpu_ram = cp.opencl_prop.global_mem_size;
             if (!gpu_ram) {
-                // HIP-only host: no OpenCL device, but localRAM is total VRAM.
-                gpu_ram = (double)cp.attribs.localRAM * MEGA;
+                // HIP-only host: no OpenCL device, but total_ram is VRAM.
+                gpu_ram = cp.total_ram;
             }
         }
 
-        // AMD driver version.  Only CAL reported one; HIP and OpenCL don't,
-        // and CAL is gone, so this is normally 0 and the min/max driver
-        // checks below are skipped.
+        // AMD driver version.  Only CAL ever reported one, so with CAL
+        // removed this stays 0 and the min/max driver-version checks below
+        // are skipped.  Plan classes that need a version gate should use
+        // min_hip_version or gcn_arch_regex instead.
         //
         driver_version = 0;
-        if (cp.have_cal) {
-            int major, minor, release, scanned;
-            scanned = sscanf(cp.version, "%d.%d.%d", &major, &minor, &release);
-            if (scanned != 3) {
-                if (config.debug_version_select) {
-                    log_messages.printf(MSG_NORMAL,
-                        "[version] plan_class_spec: CAL version '%s' couldn't be parsed\n",
-                        cp.version
-                    );
-                }
-                return false;
-            } else {
-                driver_version = ati_version_int(major,minor,release);
-            }
-        } else {
-            if (config.debug_version_select) {
-                log_messages.printf(MSG_NORMAL,
-                    "[version] plan_class_spec: no AMD driver version available; "
-                    "driver-version requirements are not checked\n"
-                );
-            }
-        }
 
         if (sreq.host.is_windows() && docker) {
             if (!check_wsl_gpu(sreq, "amd")) {
@@ -1159,11 +1093,11 @@ bool PLAN_CLASS_SPEC::check(
             return false;
         }
         opencl_other = true;
-        if (cpp && !strcmp(cpp->type, sreq.coprocs.ati.type)
-            && !sreq.coprocs.ati.devices.empty()
+        if (cpp && !strcmp(cpp->type, sreq.coprocs.amd.type)
+            && !sreq.coprocs.amd.devices.empty()
         ) {
             if (!amd_select_devices(
-                *this, sreq.coprocs.ati, hu, cp_dev, best_dev,
+                *this, sreq.coprocs.amd, hu, cp_dev, best_dev,
                 gpu_ram_min, per_device
             )) {
                 return false;
@@ -1261,20 +1195,20 @@ bool PLAN_CLASS_SPEC::check(
         // type or breaking existing AMD plan classes.
         //
         if (require_hip || min_hip_version || gcn_arch_regex.is_set()) {
-            // cpp points at sreq.coprocs.ati for <gpu_type>amd/ati</gpu_type>,
+            // cpp points at sreq.coprocs.amd for <gpu_type>amd/amd</gpu_type>,
             // but at an element of the coprocs array when the class matched
             // through gpu_type_regex or lookup_type().  Compare the resource
             // type rather than the address so both paths work.
             //
-            bool is_amd = (cpp == &sreq.coprocs.ati)
-                || (sreq.coprocs.ati.count
-                    && !strcmp(cpp->type, sreq.coprocs.ati.type));
+            bool is_amd = (cpp == &sreq.coprocs.amd)
+                || (sreq.coprocs.amd.count
+                    && !strcmp(cpp->type, sreq.coprocs.amd.type));
             // cpp may be the aggregate, the per-device representative, or
             // a base COPROC from the coprocs array; use the aggregate when
             // it is not one of our derived objects.
-            COPROC_ATI* ati_cpp = (cpp == &cp_dev)
-                ? &cp_dev : &sreq.coprocs.ati;
-            if (!is_amd || !ati_cpp->have_hip) {
+            COPROC_AMD* amd_cpp = (cpp == &cp_dev)
+                ? &cp_dev : &sreq.coprocs.amd;
+            if (!is_amd || !amd_cpp->have_hip) {
                 if (config.debug_version_select) {
                     log_messages.printf(MSG_NORMAL,
                         "[version] plan_class_spec: GPU does not support HIP\n"
@@ -1282,11 +1216,11 @@ bool PLAN_CLASS_SPEC::check(
                 }
                 return false;
             }
-            if (min_hip_version && ati_cpp->hip_version < min_hip_version) {
+            if (min_hip_version && amd_cpp->hip_version < min_hip_version) {
                 if (config.debug_version_select) {
                     char min_ver[32], supplied_ver[32];
                     format_hip_version(min_hip_version, min_ver, sizeof(min_ver));
-                    format_hip_version(ati_cpp->hip_version,
+                    format_hip_version(amd_cpp->hip_version,
                         supplied_ver, sizeof(supplied_ver));
                     log_messages.printf(MSG_NORMAL,
                         "[version] plan_class_spec: HIP version required min: %s, supplied: %s\n",
@@ -1296,13 +1230,13 @@ bool PLAN_CLASS_SPEC::check(
                 return false;
             }
             if (gcn_arch_regex.is_set()
-                && (!ati_cpp->gcn_arch[0]
-                    || regexec(gcn_arch_regex.get(), ati_cpp->gcn_arch, 0, NULL, 0))
+                && (!amd_cpp->gcn_arch[0]
+                    || regexec(gcn_arch_regex.get(), amd_cpp->gcn_arch, 0, NULL, 0))
             ) {
                 if (config.debug_version_select) {
                     log_messages.printf(MSG_NORMAL,
                         "[version] plan_class_spec: gcn_arch does not match regex: %s\n",
-                        ati_cpp->gcn_arch
+                        amd_cpp->gcn_arch
                     );
                 }
                 return false;
@@ -1542,6 +1476,19 @@ bool PLAN_CLASS_SPECS::wu_is_infeasible(
     return false;
 }
 
+// CAL is no longer supported: AMD GPUs are detected and used through HIP
+// and OpenCL.  Projects may still have plan classes carrying the CAL
+// options, so they are parsed and ignored rather than rejected, with a
+// warning so the operator can clean them up.
+//
+static void warn_cal_option(const char* opt) {
+    log_messages.printf(MSG_NORMAL,
+        "[version] plan_class_spec: <%s> is obsolete and ignored; CAL is no "
+        "longer supported.  Remove it or switch the plan class to HIP/OpenCL.\n",
+        opt
+    );
+}
+
 int PLAN_CLASS_SPEC::parse(XML_PARSER& xp) {
     char buf[256];
     int i;
@@ -1554,7 +1501,10 @@ int PLAN_CLASS_SPEC::parse(XML_PARSER& xp) {
         if (xp.parse_int("max_core_client_version", max_core_client_version)) continue;
         if (xp.parse_str("gpu_type", gpu_type, sizeof(gpu_type))) continue;
         if (xp.parse_bool("cuda", cuda)) continue;
-        if (xp.parse_bool("cal", cal)) continue;
+        if (xp.parse_bool("cal", cal)) {
+            warn_cal_option("cal");
+            continue;
+        }
         if (xp.parse_bool("opencl", opencl)) continue;
         if (xp.parse_bool("virtualbox", virtualbox)) continue;
         if (xp.parse_bool("wsl", wsl)) continue;
@@ -1629,12 +1579,27 @@ int PLAN_CLASS_SPEC::parse(XML_PARSER& xp) {
         if (xp.parse_int("max_driver_version", max_driver_version)) continue;
         if (xp.parse_str("gpu_utilization_tag", gpu_utilization_tag, sizeof(gpu_utilization_tag))) continue;
 
-        if (xp.parse_bool("need_ati_libs", need_ati_libs)) continue;
-        if (xp.parse_bool("need_amd_libs", need_amd_libs)) continue;
+        if (xp.parse_bool("need_ati_libs", need_ati_libs)) {
+            warn_cal_option("need_ati_libs");
+            continue;
+        }
+        if (xp.parse_bool("need_amd_libs", need_amd_libs)) {
+            warn_cal_option("need_amd_libs");
+            continue;
+        }
         if (xp.parse_int("min_amd_simd_width", min_amd_simd_width)) continue;
-        if (xp.parse_bool("without_opencl", without_opencl)) continue;
-        if (xp.parse_int("min_cal_target", min_cal_target)) continue;
-        if (xp.parse_int("max_cal_target", max_cal_target)) continue;
+        if (xp.parse_bool("without_opencl", without_opencl)) {
+            warn_cal_option("without_opencl");
+            continue;
+        }
+        if (xp.parse_int("min_cal_target", min_cal_target)) {
+            warn_cal_option("min_cal_target");
+            continue;
+        }
+        if (xp.parse_int("max_cal_target", max_cal_target)) {
+            warn_cal_option("max_cal_target");
+            continue;
+        }
         if (xp.parse_bool("require_hip", require_hip)) continue;
         if (xp.parse_int("min_hip_version", min_hip_version)) continue;
         if (xp.parse_str("gcn_arch_regex", buf, sizeof(buf))) {
@@ -1818,11 +1783,10 @@ int main() {
         sreq.coprocs.nvidia.count = 0;
     }
     if (1) {
-        sreq.coprocs.ati.fake(512*MEGA, 256*MEGA, 1);
-        sreq.coprocs.ati.have_cal = true;
-        sreq.coprocs.ati.opencl_prop.opencl_device_version_int = 0;
+        sreq.coprocs.amd.fake(512*MEGA, 256*MEGA, 1);
+        sreq.coprocs.amd.opencl_prop.opencl_device_version_int = 0;
     } else {
-        sreq.coprocs.ati.count = 0;
+        sreq.coprocs.amd.count = 0;
     }
 
     for (const PLAN_CLASS_SPEC& spec: pcs.classes) {

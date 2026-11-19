@@ -235,7 +235,7 @@ static bool kfd_lookup(
 }
 #endif
 
-int ati_compare(COPROC_ATI& c1, COPROC_ATI& c2, bool loose) {
+int amd_compare(COPROC_AMD& c1, COPROC_AMD& c2, bool loose) {
     // Strict comparison picks the most capable card: peak FP32 first, so
     // an FP64 guess for an unknown architecture cannot outrank a much
     // faster device.  Loose comparison groups equivalent instances.
@@ -244,28 +244,27 @@ int ati_compare(COPROC_ATI& c1, COPROC_ATI& c2, bool loose) {
         if (c1.peak_flops > c2.peak_flops) return 1;
         if (c1.peak_flops < c2.peak_flops) return -1;
     }
-    // Prefer a device that actually reports FP64.  attribs.doublePrecision
-    // is only populated by the CAL path, so use the common FP64 fields.
+    // Prefer a device that actually reports FP64.
     //
     if (c1.have_fp64 && !c2.have_fp64) return 1;
     if (!c1.have_fp64 && c2.have_fp64) return -1;
     if (loose) {
-        if (c1.attribs.localRAM> 1.4*c2.attribs.localRAM) return 1;
-        if (c1.attribs.localRAM< .7* c2.attribs.localRAM) return -1;
+        if (c1.total_ram > 1.4*c2.total_ram) return 1;
+        if (c1.total_ram < .7* c2.total_ram) return -1;
         return 0;
     }
-    if (c1.attribs.localRAM > c2.attribs.localRAM) return 1;
-    if (c1.attribs.localRAM < c2.attribs.localRAM) return -1;
+    if (c1.total_ram > c2.total_ram) return 1;
+    if (c1.total_ram < c2.total_ram) return -1;
     return 0;
 }
 
-void COPROC_ATI::correlate(
+void COPROC_AMD::correlate(
     bool use_all,
     vector<int>& ignore_devs
 ) {
     (void)use_all;      // AMD now reports every usable device
 
-    if (!ati_gpus.size()) return;
+    if (!amd_gpus.size()) return;
 
     // Find the most capable non-ignored instance.  It supplies the
     // vendor/driver fields; the per-device report and the conservative
@@ -273,13 +272,13 @@ void COPROC_ATI::correlate(
     //
     bool first = true;
     unsigned int i;
-    for (i=0; i<ati_gpus.size(); i++) {
-        if (in_vector(ati_gpus[i].device_num, ignore_devs)) continue;
+    for (i=0; i<amd_gpus.size(); i++) {
+        if (in_vector(amd_gpus[i].device_num, ignore_devs)) continue;
         if (first) {
-            *this = ati_gpus[i];
+            *this = amd_gpus[i];
             first = false;
-        } else if (ati_compare(ati_gpus[i], *this, false) > 0) {
-            *this = ati_gpus[i];
+        } else if (amd_compare(amd_gpus[i], *this, false) > 0) {
+            *this = amd_gpus[i];
         }
     }
 
@@ -290,13 +289,13 @@ void COPROC_ATI::correlate(
     bool all_fp64 = true, all_hip = true, all_opencl = true;
     bool arch_common = true;
     double min_dp = 0, min_avail = 0, min_ocl = 0, max_peak = 0;
-    int min_ram = 0;
+    double min_ram = 0;
     char common_arch[64];
     common_arch[0] = 0;
     bool first_used = true;
 
-    for (i=0; i<ati_gpus.size(); i++) {
-        COPROC_ATI& d = ati_gpus[i];
+    for (i=0; i<amd_gpus.size(); i++) {
+        COPROC_AMD& d = amd_gpus[i];
         if (in_vector(d.device_num, ignore_devs)) {
             d.is_used = COPROC_IGNORED;
             continue;
@@ -327,7 +326,7 @@ void COPROC_ATI::correlate(
             min_dp = d.peak_flops_dp;
             min_avail = d.available_ram;
             min_ocl = d.opencl_prop.global_mem_size;
-            min_ram = d.attribs.localRAM;
+            min_ram = d.total_ram;
             max_peak = d.peak_flops;
             first_used = false;
         } else {
@@ -339,7 +338,7 @@ void COPROC_ATI::correlate(
             ) {
                 min_ocl = d.opencl_prop.global_mem_size;
             }
-            if (d.attribs.localRAM < min_ram) min_ram = d.attribs.localRAM;
+            if (d.total_ram < min_ram) min_ram = d.total_ram;
             if (d.peak_flops > max_peak) max_peak = d.peak_flops;
         }
         if (!d.have_fp64) all_fp64 = false;
@@ -356,7 +355,7 @@ void COPROC_ATI::correlate(
     peak_flops_dp = all_fp64? min_dp : 0;
     if (!arch_common) gcn_arch[0] = 0;
     else safe_strcpy(gcn_arch, common_arch);
-    attribs.localRAM = min_ram;
+    total_ram = min_ram;
     available_ram = min_avail;
     opencl_prop.global_mem_size = min_ocl;
     peak_flops = max_peak;
@@ -365,7 +364,7 @@ void COPROC_ATI::correlate(
     opencl_device_count = count;
 }
 
-void COPROC_ATI::get_hip(vector<string>& warnings) {
+void COPROC_AMD::get_hip(vector<string>& warnings) {
     char buf[256];
     string s;
     int n = 0;
@@ -405,7 +404,7 @@ void COPROC_ATI::get_hip(vector<string>& warnings) {
     }
 
     for (int i=0; i<n; i++) {
-        COPROC_ATI cc;
+        COPROC_AMD cc;
         cc.clear();
         cc.count = 1;
         cc.have_hip = true;
@@ -451,10 +450,10 @@ void COPROC_ATI::get_hip(vector<string>& warnings) {
                 free_mem = (double)free_bytes;
             }
         }
-        // available_ram is what the scheduler may use; localRAM is total.
+        // available_ram is what the scheduler may use; total_ram is total.
         //
         cc.available_ram = free_mem;
-        cc.attribs.localRAM = (int)(total_mem/MEGA);
+        cc.total_ram = total_mem;
 
         int bus = -1;
         if (p_hipDeviceGetPCIBusId) {
@@ -516,8 +515,8 @@ void COPROC_ATI::get_hip(vector<string>& warnings) {
                 if (!cc.hip_clock_khz && clk_mhz) {
                     cc.hip_clock_khz = clk_mhz * 1000;
                 }
-                if (!cc.attribs.localRAM && vram) {
-                    cc.attribs.localRAM = (int)(vram/MEGA);
+                if (!cc.total_ram && vram) {
+                    cc.total_ram = vram;
                 }
                 if (!cc.name[0] && node_name[0]
                     && strcmp(node_name, "ip discovery")
@@ -571,23 +570,19 @@ void COPROC_ATI::get_hip(vector<string>& warnings) {
             cc.hip_clock_khz = dpm_clock*1000;
         }
 
-        // Derive the lane count if KFD did not provide it.
+        // Derive the lane count if KFD did not provide it.  This is the
+        // same rule set_peak_flops() uses, so both agree.
         if (!cc.hip_lane_count && cc.hip_cu_count) {
-            int lanes_per_cu = 64;
-            if (cc.hip_warp_size == 32
-                || (!cc.hip_warp_size && cc.gfxip_major >= 10)
-                || (cc.gfxip_major == 9 && cc.gfx_target_version >= 90400)
-            ) {
-                lanes_per_cu = 128;
-            }
-            cc.hip_lane_count = cc.hip_cu_count * lanes_per_cu;
+            cc.hip_lane_count = cc.hip_cu_count * hip_lanes_per_cu(
+                cc.hip_warp_size, cc.gfxip_major, cc.gfx_target_version
+            );
         }
 
         cc.set_peak_flops();
         if (cc.bad_gpu_peak_flops("HIP", s)) {
             gpu_warning(warnings, s.c_str());
         }
-        ati_gpus.push_back(cc);
+        amd_gpus.push_back(cc);
     }
 
     if (log_flags.coproc_debug) {
@@ -595,7 +590,7 @@ void COPROC_ATI::get_hip(vector<string>& warnings) {
         format_hip_version(runtime_version, hip_ver, sizeof(hip_ver));
         msg_printf(NULL, MSG_INFO,
             "[coproc] HIP detected %d AMD GPU(s), runtime %s",
-            (int)ati_gpus.size(), hip_ver
+            (int)amd_gpus.size(), hip_ver
         );
     }
 

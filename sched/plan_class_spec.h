@@ -81,12 +81,12 @@ struct PLAN_CLASS_SPEC {
     char gpu_type[256];
         // nvidia, amd, intel, or apple
         // or model name, e.g. 'QUALCOMM Adreno (TM)'
-        // Allow ati (== amd) or apple_gpu (== apple) for compatibility
+        // Allow amd (== amd) or apple_gpu (== apple) for compatibility
         // with old projects.
         // You can omit this and use gpu_type_regex to match
         // GPU type in a more flexible way
     bool cuda;
-    bool cal;
+    bool cal;               // obsolete: CAL only; parsed and ignored
     bool opencl;
     bool virtualbox;
     bool wsl;
@@ -143,15 +143,15 @@ struct PLAN_CLASS_SPEC {
 
     // AMD/ATI apps
     //
-    bool need_ati_libs;
-    bool need_amd_libs;
+    bool need_ati_libs;     // obsolete: CAL only; parsed and ignored
+    bool need_amd_libs;     // obsolete: CAL only; parsed and ignored
         // need DLLs w/ ATI or AMD name (default: neither)
     int min_amd_simd_width;
         // SIMD width for old GCN GPUs is 16; for new RDNA GPUs it's 32
         // so you can distinguish them this way
-    int min_cal_target;
-    int max_cal_target;
-    bool without_opencl; // restrict to CAL only GPUs
+    int min_cal_target;     // obsolete: CAL only; parsed and ignored
+    int max_cal_target;     // obsolete: CAL only; parsed and ignored
+    bool without_opencl;    // obsolete: CAL only; parsed and ignored
     bool require_hip;    // require the AMD device to report HIP support
     int min_hip_version; // minimum HIP runtime version (encoded value)
     PLAN_CLASS_REGEX gcn_arch_regex;
@@ -216,7 +216,7 @@ struct AMD_DEVICE_REQUIREMENTS {
 };
 
 inline bool amd_device_matches(
-    const AMD_DEVICE_REQUIREMENTS& req, const COPROC_ATI_DEVICE& dev,
+    const AMD_DEVICE_REQUIREMENTS& req, const COPROC_AMD_DEVICE& dev,
     double& gpu_ram, const char** why
 ) {
     if (why) *why = NULL;
@@ -383,14 +383,14 @@ inline int gpu_matching_devices(
 // total RAM among matches.  Empty cp.devices returns 0.
 //
 inline int amd_matching_devices(
-    const AMD_DEVICE_REQUIREMENTS& req, const COPROC_ATI& cp,
+    const AMD_DEVICE_REQUIREMENTS& req, const COPROC_AMD& cp,
     int* nums, int max, int& best, double& min_ram
 ) {
     best = -1;
     min_ram = 0;
     int n = 0;
     for (unsigned int i=0; i<cp.devices.size(); i++) {
-        const COPROC_ATI_DEVICE& d = cp.devices[i];
+        const COPROC_AMD_DEVICE& d = cp.devices[i];
         if (!device_num_allowed(cp.device_nums, cp.count, d.device_num)) {
             continue;
         }

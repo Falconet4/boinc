@@ -690,12 +690,12 @@ void CProjectInfoPage::OnPageChanged(wxWizardEvent& event) {
 
                     if (strProjectPlanClass.Find(_T("ati")) != wxNOT_FOUND) {
                         pProjectInfo->m_bProjectSupportsCAL = true;
-                        if (!pDoc->state.host_info.coprocs.have_ati()) continue;
+                        if (!pDoc->state.host_info.coprocs.have_amd()) continue;
                     }
 
                     if (strProjectPlanClass.Find(_T("amd")) != wxNOT_FOUND) {
                         pProjectInfo->m_bProjectSupportsCAL = true;
-                        if (!pDoc->state.host_info.coprocs.have_ati()) continue;
+                        if (!pDoc->state.host_info.coprocs.have_amd()) continue;
                     }
 
                     if (strProjectPlanClass.Find(_T("intel_gpu")) != wxNOT_FOUND) {

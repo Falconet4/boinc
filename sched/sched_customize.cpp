@@ -63,12 +63,12 @@ using std::string;
 #include "sched_customize.h"
 #include "plan_class_spec.h"
 
-#ifndef ATI_MIN_RAM
-#define ATI_MIN_RAM 256*MEGA
+#ifndef AMD_MIN_RAM
+#define AMD_MIN_RAM 256*MEGA
 #endif
 
-#ifndef OPENCL_ATI_MIN_RAM
-#define OPENCL_ATI_MIN_RAM 256*MEGA
+#ifndef OPENCL_AMD_MIN_RAM
+#define OPENCL_AMD_MIN_RAM 256*MEGA
 #endif
 
 #ifndef OPENCL_INTEL_GPU_MIN_RAM
@@ -189,8 +189,7 @@ bool app_plan_opencl_cpu_intel(SCHEDULER_REQUEST& sreq, HOST_USAGE& hu) {
     return app_plan_mt(sreq, hu);
 }
 
-static bool ati_check(COPROC_ATI& c, HOST_USAGE& hu,
-    int min_driver_version,
+static bool amd_check(COPROC_AMD& c, HOST_USAGE& hu,
     bool need_amd_libs,
     double min_ram,
     double ndevs,       // # of GPUs used; can be fractional
@@ -198,8 +197,8 @@ static bool ati_check(COPROC_ATI& c, HOST_USAGE& hu,
     double flops_scale,
     int min_hd_model=0
 ) {
-    if (c.version_num) {
-        gpu_requirements[PROC_TYPE_AMD_GPU].update(min_driver_version, min_ram);
+    if (min_ram) {
+        gpu_requirements[PROC_TYPE_AMD_GPU].update(0, min_ram);
     }
 
     if (min_hd_model) {
@@ -231,8 +230,11 @@ static bool ati_check(COPROC_ATI& c, HOST_USAGE& hu,
     }
 
 
+    // CAL is gone, so there is no AMD driver version to compare: only CAL
+    // ever reported one.  Require a usable AMD runtime instead.
+    //
     if (need_amd_libs) {
-        if (!c.amdrt_detected) {
+        if (!c.have_hip && !c.have_opencl) {
             if (config.debug_version_select) {
                 log_messages.printf(MSG_NORMAL,
                     "[version] AMD runtime libraries not found\n"
@@ -240,30 +242,6 @@ static bool ati_check(COPROC_ATI& c, HOST_USAGE& hu,
             }
             return false;
         }
-    } else {
-        if (!c.atirt_detected) {
-            if (config.debug_version_select) {
-                log_messages.printf(MSG_NORMAL,
-                    "[version] AMD runtime libraries not found\n"
-                );
-            }
-            return false;
-        }
-    }
-    if (c.version_num < min_driver_version) {
-        if (config.debug_version_select) {
-            int app_major=min_driver_version/10000000;
-            int app_minor=(min_driver_version%10000000)/10000;
-            int app_rev=(min_driver_version%10000);
-            int dev_major=c.version_num/10000000;
-            int dev_minor=(c.version_num%10000000)/10000;
-            int dev_rev=(c.version_num%10000);
-            log_messages.printf(MSG_NORMAL,
-                "[version] Bad display driver revision %d.%d.%d<%d.%d.%d.\n",
-                dev_major,dev_minor,dev_rev,app_major,app_minor,app_rev
-            );
-        }
-        return false;
     }
     if (c.available_ram < min_ram) {
         if (config.debug_version_select) {
@@ -290,10 +268,10 @@ static bool ati_check(COPROC_ATI& c, HOST_USAGE& hu,
     return true;
 }
 
-static inline bool app_plan_ati(
+static inline bool app_plan_amd(
     SCHEDULER_REQUEST& sreq, const char* plan_class, HOST_USAGE& hu
 ) {
-    COPROC_ATI& c = sreq.coprocs.ati;
+    COPROC_AMD& c = sreq.coprocs.amd;
     if (!c.count) {
         if (config.debug_version_select) {
             log_messages.printf(MSG_NORMAL,"[version] Host has no AMD GPUs\n");
@@ -302,10 +280,9 @@ static inline bool app_plan_ati(
     }
 
     if (!strcmp(plan_class, "ati")) {
-        if (!ati_check(c, hu,
-            ati_version_int(1, 0, 0),
+        if (!amd_check(c, hu,
             true,
-            ATI_MIN_RAM,
+            AMD_MIN_RAM,
             1,
             .01,
             .20
@@ -315,10 +292,9 @@ static inline bool app_plan_ati(
     }
 
     if (!strcmp(plan_class, "ati13amd")) {
-        if (!ati_check(c, hu,
-            ati_version_int(1, 3, 0),
+        if (!amd_check(c, hu,
             true,
-            ATI_MIN_RAM,
+            AMD_MIN_RAM,
             1, .01,
             .21
         )) {
@@ -327,10 +303,9 @@ static inline bool app_plan_ati(
     }
 
     if (!strcmp(plan_class, "ati13ati")) {
-        if (!ati_check(c, hu,
-            ati_version_int(1, 3, 186),
+        if (!amd_check(c, hu,
             false,
-            ATI_MIN_RAM,
+            AMD_MIN_RAM,
             1, .01,
             .22
         )) {
@@ -339,10 +314,9 @@ static inline bool app_plan_ati(
     }
 
     if (!strcmp(plan_class, "ati14")) {
-        if (!ati_check(c, hu,
-            ati_version_int(1, 4, 0),
+        if (!amd_check(c, hu,
             false,
-            ATI_MIN_RAM,
+            AMD_MIN_RAM,
             1, .01,
             .23
         )) {
@@ -352,12 +326,11 @@ static inline bool app_plan_ati(
 
 #ifdef SETIATHOME
     // ati_opencl_<ver> plan classes are for running
-    // opencl ati apps on pre-v7 boinc core clients
+    // opencl amd apps on pre-v7 boinc core clients
     if (!strcmp(plan_class, "ati_opencl_100")) {
-        if (!ati_check(c, hu,
-            ati_version_int(1, 4, 1386),
+        if (!amd_check(c, hu,
             false,
-            OPENCL_ATI_MIN_RAM,
+            OPENCL_AMD_MIN_RAM,
             1, .01,
             .14,
             4600
@@ -753,7 +726,7 @@ static inline bool app_plan_opencl(
             return false;
         }
     } else if (strstr(plan_class, "amd")) {
-        COPROC_ATI& c = sreq.coprocs.ati;
+        COPROC_AMD& c = sreq.coprocs.amd;
         if (!c.count) {
             if (config.debug_version_select) {
                 log_messages.printf(MSG_NORMAL,
@@ -776,7 +749,7 @@ static inline bool app_plan_opencl(
             return opencl_check(
                 c, hu,
                 ver,
-                OPENCL_ATI_MIN_RAM,
+                OPENCL_AMD_MIN_RAM,
                 1,
                 .01,
                 .14
@@ -1030,7 +1003,7 @@ bool app_plan(
     } else if (strstr(plan_class, "opencl") == plan_class) {
         return app_plan_opencl(sreq, plan_class, hu);
     } else if (strstr(plan_class, "ati") == plan_class) {
-        return app_plan_ati(sreq, plan_class, hu);
+        return app_plan_amd(sreq, plan_class, hu);
     } else if (strstr(plan_class, "cuda")) {
         return app_plan_nvidia(sreq, plan_class, hu);
     } else if (!strcmp(plan_class, "nci")) {
