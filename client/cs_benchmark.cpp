@@ -129,9 +129,11 @@ static void remove_benchmark_file(int which) {
     boinc_delete_file(file_names[which]);
 }
 
-static void make_benchmark_file(int which) {
+static int make_benchmark_file(int which) {
     FILE* f = boinc_fopen(file_names[which], "w");
-    fclose(f);
+    if (!f) return ERR_FOPEN;
+    if (fclose(f)) return ERR_FCLOSE;
+    return 0;
 }
 
 void benchmark_wait_to_start(int which) {
@@ -276,6 +278,15 @@ void CLIENT_STATE::start_cpu_benchmarks(bool force) {
             NULL, 0, win_cpu_benchmarks, &benchmark_descs[i], 0,
             &benchmark_descs[i].pid
         );
+        if (!benchmark_descs[i].handle) {
+            benchmark_descs[i].done = true;
+            benchmark_descs[i].error = true;
+            snprintf(benchmark_descs[i].error_str,
+                sizeof(benchmark_descs[i].error_str),
+                "CreateThread() failed: %lu", GetLastError()
+            );
+            continue;
+        }
         int n = host_info.p_ncpus;
         int j = (i >= n/2)? 2*i+1-n : 2*i;
         SetThreadAffinityMask(benchmark_descs[i].handle, 1ull<<j);
@@ -292,6 +303,19 @@ void CLIENT_STATE::start_cpu_benchmarks(bool force) {
             int retval = cpu_benchmarks(&benchmark_descs[i]);
             fflush(NULL);
             _exit(retval);
+        } else if (pid < 0) {
+            // Do not store -1: abort_benchmark() would kill(-1, SIGKILL)
+            // and check_benchmark() would waitpid(-1, ...).
+            benchmark_descs[i].pid = 0;
+            benchmark_descs[i].done = true;
+            benchmark_descs[i].error = true;
+            snprintf(benchmark_descs[i].error_str,
+                sizeof(benchmark_descs[i].error_str),
+                "fork() failed: %s", strerror(errno)
+            );
+            msg_printf(NULL, MSG_INTERNAL_ERROR, "%s",
+                benchmark_descs[i].error_str
+            );
         } else {
             benchmark_descs[i].pid = pid;
         }
@@ -337,7 +361,9 @@ void abort_benchmark(BENCHMARK_DESC& desc) {
     TerminateThread(desc.handle, 0);
     CloseHandle(desc.handle);
 #else
-    kill(desc.pid, SIGKILL);
+    if (desc.pid > 0) {
+        kill(desc.pid, SIGKILL);
+    }
 #endif
 }
 
@@ -354,6 +380,14 @@ void check_benchmark(BENCHMARK_DESC& desc) {
 #else
     int retval;
     int exit_code = 0;
+    if (desc.done) return;
+    if (desc.pid <= 0) {
+        // fork() failed when this benchmark was started; never call
+        // waitpid(-1), which would steal another child's status.
+        desc.done = true;
+        desc.error = true;
+        return;
+    }
     retval = waitpid(desc.pid, &exit_code, WNOHANG);
     if (retval) {
         desc.done = true;
@@ -414,7 +448,17 @@ bool CLIENT_STATE::cpu_benchmarks_poll() {
                     "[benchmark] Starting floating-point benchmark"
                 );
             }
-            make_benchmark_file(BM_TYPE_FP);
+            if (make_benchmark_file(BM_TYPE_FP)) {
+                msg_printf(NULL, MSG_INTERNAL_ERROR,
+                    "Can't create benchmark file; aborting CPU benchmarks"
+                );
+                abort_cpu_benchmarks();
+                cpu_benchmarks_set_defaults();
+                benchmarks_running = false;
+                bm_state = BM_DONE;
+                set_client_state_dirty("CPU benchmarks");
+                return true;
+            }
             bm_state = BM_FP;
         }
         return false;
@@ -436,7 +480,17 @@ bool CLIENT_STATE::cpu_benchmarks_poll() {
                     "[benchmark] Starting integer benchmark"
                 );
             }
-            make_benchmark_file(BM_TYPE_INT);
+            if (make_benchmark_file(BM_TYPE_INT)) {
+                msg_printf(NULL, MSG_INTERNAL_ERROR,
+                    "Can't create benchmark file; aborting CPU benchmarks"
+                );
+                abort_cpu_benchmarks();
+                cpu_benchmarks_set_defaults();
+                benchmarks_running = false;
+                bm_state = BM_DONE;
+                set_client_state_dirty("CPU benchmarks");
+                return true;
+            }
             bm_state = BM_INT;
         }
         return false;

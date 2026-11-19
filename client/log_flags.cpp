@@ -815,7 +815,10 @@ void set_no_rsc_config() {
             memset(allowed, 0, sizeof(allowed));
             COPROC& c = coprocs.coprocs[j];
             for (int k=0; k<c.count; k++) {
-                allowed[c.device_nums[k]] = true;
+                int n = c.device_nums[k];
+                if (n >= 0 && n < MAX_COPROC_INSTANCES) {
+                    allowed[n] = true;
+                }
             }
             for (unsigned int k=0; k<cc_config.exclude_gpus.size(); k++) {
                 EXCLUDE_GPU& e = cc_config.exclude_gpus[k];
@@ -826,7 +829,9 @@ void set_no_rsc_config() {
                     memset(allowed, 0, sizeof(allowed));
                     break;
                 }
-                allowed[e.device_num] = false;
+                if (e.device_num >= 0 && e.device_num < MAX_COPROC_INSTANCES) {
+                    allowed[e.device_num] = false;
+                }
             }
             p->no_rsc_config[j] = true;
             for (int k=0; k<c.count; k++) {
