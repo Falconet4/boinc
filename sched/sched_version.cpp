@@ -551,10 +551,13 @@ static BEST_APP_VERSION* check_homogeneous_app_version(
     }
 
     // dynamically allocate the BEST_APP_VERSION.
-    // This is a memory leak, but that's OK
+    // It is not memoized (the key would need the per-WU app_version_id),
+    // but it is reachable from the reply, so keep it until request
+    // teardown; retired_best_app_versions is freed without being searched.
     //
     BEST_APP_VERSION* bavp = new BEST_APP_VERSION;
     *bavp = bav;
+    g_wreq->retired_best_app_versions.push_back(bavp);
     return bavp;
 }
 
@@ -647,6 +650,7 @@ BEST_APP_VERSION* get_app_version(
                         "[version] %s: max jobs in progress exceeded\n", buf
                     );
                 }
+                g_wreq->retired_best_app_versions.push_back(bavp);
                 g_wreq->best_app_versions.erase(bavi);
                 break;
             }
@@ -664,6 +668,7 @@ BEST_APP_VERSION* get_app_version(
                             proc_type_name(pt)
                         );
                     }
+                    g_wreq->retired_best_app_versions.push_back(bavp);
                     g_wreq->best_app_versions.erase(bavi);
                     break;
                 }

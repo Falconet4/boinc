@@ -430,7 +430,7 @@ void send_work_score_type(int rt) {
     }
 
     restore_others(rt);
-    g_wreq->best_app_versions.clear();
+    g_wreq->retire_best_app_versions();
 }
 
 void send_work_score() {

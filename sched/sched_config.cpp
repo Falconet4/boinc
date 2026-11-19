@@ -65,6 +65,16 @@ int SCHED_CONFIG::parse_aux(FILE* f) {
     return ERR_XML_PARSE;
 }
 
+// Release the compiled patterns in a regex vector, then the vector.
+//
+static void free_regex_vector(vector<regex_t>* v) {
+    if (!v) return;
+    for (size_t i=0; i<v->size(); i++) {
+        regfree(&(*v)[i]);
+    }
+    delete v;
+}
+
 int SCHED_CONFIG::parse(FILE* f) {
     char buf[256];
     MIOFILE mf;
@@ -75,7 +85,21 @@ int SCHED_CONFIG::parse(FILE* f) {
 
     mf.init_file(f);
 
-    memset(this, 0, sizeof(*this));
+    // SCHED_CONFIG contains a std::vector member.  A raw memset() here
+    // would overwrite its internals; value-initialize a fresh object
+    // instead.  Release the old regex vectors first so a second parse
+    // does not leak them.
+    //
+    free_regex_vector(ban_os);
+    free_regex_vector(ban_cpu);
+    free_regex_vector(locality_scheduling_workunit_file);
+    free_regex_vector(locality_scheduling_sticky_file);
+    ban_os = nullptr;
+    ban_cpu = nullptr;
+    locality_scheduling_workunit_file = nullptr;
+    locality_scheduling_sticky_file = nullptr;
+    dont_search_host_for_userid.clear();
+    *this = SCHED_CONFIG{};
     ban_os = new vector<regex_t>;
     ban_cpu = new vector<regex_t>;
     locality_scheduling_workunit_file = new vector<regex_t>;
@@ -294,8 +318,9 @@ int SCHED_CONFIG::parse(FILE* f) {
         if (xp.parse_double("next_rpc_delay", next_rpc_delay)) continue;
         if (xp.parse_bool("no_amd_k6", no_amd_k6)) {
             if (no_amd_k6) {
-                regcomp(&re, ".*AMD.*\t.*Family 5 Model 8 Stepping 0.*", REG_EXTENDED|REG_NOSUB);
-                ban_cpu->push_back(re);
+                if (!regcomp(&re, ".*AMD.*\t.*Family 5 Model 8 Stepping 0.*", REG_EXTENDED|REG_NOSUB)) {
+                    ban_cpu->push_back(re);
+                }
             }
             continue;
         }

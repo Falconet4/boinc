@@ -373,7 +373,7 @@ void send_work_old() {
         }
         if (scan_work_array()) return;
         g_wreq->reliable_only = false;
-        g_wreq->best_app_versions.clear();
+        g_wreq->retire_best_app_versions();
     } else {
         if (config.debug_send_scan) {
             log_messages.printf(MSG_NORMAL,

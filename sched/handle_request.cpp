@@ -1221,7 +1221,7 @@ void process_request(char* code_sign_key) {
     HOST initial_host;
     time_t t;
 
-    memset(&g_reply->wreq, 0, sizeof(g_reply->wreq));
+    g_reply->wreq.clear();
 
     // if client has sticky files we don't need any more, tell it
     //
