@@ -101,7 +101,12 @@ echo "<p></p>";
 if ($preview == tra("Preview")) {
     panel(tra('Preview'),
         function() use($content, $title) {
-            echo "<span class=lead>$title</span><p>\n";
+            // $title is echoed raw here otherwise; it comes straight from
+            // post_str()/get_str(), which do not escape.  The content is
+            // passed through output_transform() with default options, which
+            // do escape it.
+            //
+            echo "<span class=lead>".htmlspecialchars($title)."</span><p>\n";
             echo output_transform($content, null);
         }
     );

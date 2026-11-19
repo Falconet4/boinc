@@ -772,9 +772,13 @@ function show_result($result, $show_outfile_links=false) {
         $x = "";
         foreach ($names as $name) {
             if ($i) $x .= " &middot; ";
-            $url = dir_hier_url($name, "upload", $fanout);
-            echo $name;
-            $x .= " <a href=$url>$i</a> ";
+            // $name comes from the host-reported xml_doc_out, so it is not
+            // trustworthy.  Escape it in both places it is emitted, and quote
+            // the href attribute, which the name is also part of.
+            //
+            $url = htmlspecialchars(dir_hier_url($name, "upload", $fanout));
+            echo htmlspecialchars($name);
+            $x .= " <a href=\"$url\">$i</a> ";
             $i++;
         }
         row2(tra("Output files"), $x);

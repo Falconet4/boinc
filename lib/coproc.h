@@ -384,6 +384,14 @@ inline int hip_lanes_per_cu(int warp_size, int gfxip_major, int gfx_target) {
     return 64;
 }
 
+// Parse a device <name> (or gcn_arch) element that the writers escape.
+// parse_str() reads the escaped text into its destination buffer and only
+// then unescapes it in place, so a name whose escaped form is longer than the
+// field (escaping can be 6x) would be rejected as an overflow.  Read into a
+// buffer sized for the worst case and copy the unescaped result back.
+//
+extern bool parse_escaped_name(XML_PARSER& xp, const char* tag, char* out, int len);
+
 // Parse a space-separated list of GPU device numbers.  Out-of-range and
 // malformed entries are ignored.
 //

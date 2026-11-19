@@ -49,6 +49,19 @@ using std::string;
 
 #include "coproc.h"
 
+// Parse a device <name> (or gcn_arch) element that the writers escape.
+// parse_str() reads the escaped text into its destination buffer and only
+// then unescapes it in place, so a name whose escaped form is longer than the
+// field (escaping can expand 6x) would be rejected as an overflow.  Read into
+// a buffer sized for the worst case and copy the unescaped result back.
+//
+bool parse_escaped_name(XML_PARSER& xp, const char* tag, char* out, int len) {
+    char esc[1600];
+    if (!xp.parse_str(tag, esc, sizeof(esc))) return false;
+    strlcpy(out, esc, len);
+    return true;
+}
+
 int COPROC_REQ::parse(XML_PARSER& xp) {
     safe_strcpy(type, "");
     count = 0;
@@ -154,7 +167,7 @@ int COPROC::parse(XML_PARSER& xp) {
             GPU_DEVICE d;
             while (!xp.get_tag()) {
                 if (xp.match_tag("/device")) break;
-                if (xp.parse_str("name", d.name, sizeof(d.name))) continue;
+                if (parse_escaped_name(xp, "name", d.name, sizeof(d.name))) continue;
                 if (xp.parse_int("device_num", d.device_num)) continue;
                 if (xp.parse_bool("have_fp64", d.have_fp64)) continue;
                 if (xp.parse_double("peak_flops", d.peak_flops)) continue;
@@ -753,6 +766,9 @@ void COPROC_NVIDIA::write_xml(MIOFILE& f, bool scheduler_rpc) {
 
     for (unsigned int i=0; i<devices.size(); i++) {
         const GPU_DEVICE& d = devices[i];
+        // The name comes from the driver and can contain '&' or '<'.
+        char name_escaped[1600];
+        xml_escape(d.name, name_escaped, sizeof(name_escaped));
         f.printf(
             "   <device>\n"
             "      <name>%s</name>\n"
@@ -766,7 +782,7 @@ void COPROC_NVIDIA::write_xml(MIOFILE& f, bool scheduler_rpc) {
             "      <peak_flops_dp>%f</peak_flops_dp>\n"
             "      <total_ram>%f</total_ram>\n"
             "   </device>\n",
-            d.name, d.device_num, d.compcap_major, d.compcap_minor,
+            name_escaped, d.device_num, d.compcap_major, d.compcap_minor,
             d.cuda_version, d.driver_version, d.have_fp64 ? 1 : 0,
             d.peak_flops, d.peak_flops_dp, d.total_ram
         );
@@ -834,7 +850,7 @@ int COPROC_NVIDIA::parse(XML_PARSER& xp) {
             GPU_DEVICE d;
             while (!xp.get_tag()) {
                 if (xp.match_tag("/device")) break;
-                if (xp.parse_str("name", d.name, sizeof(d.name))) continue;
+                if (parse_escaped_name(xp, "name", d.name, sizeof(d.name))) continue;
                 if (xp.parse_int("device_num", d.device_num)) continue;
                 if (xp.parse_int("compcap_major", d.compcap_major)) continue;
                 if (xp.parse_int("compcap_minor", d.compcap_minor)) continue;
@@ -1239,6 +1255,11 @@ void COPROC_AMD::write_xml(MIOFILE& f, bool scheduler_rpc) {
 
     for (unsigned int i=0; i<devices.size(); i++) {
         const COPROC_AMD_DEVICE& d = devices[i];
+        // Name and gcn_arch come from the driver; escape them for XML.
+        char name_escaped[1600];
+        char arch_escaped[400];
+        xml_escape(d.name, name_escaped, sizeof(name_escaped));
+        xml_escape(d.gcn_arch, arch_escaped, sizeof(arch_escaped));
         f.printf(
             "   <device>\n"
             "      <name>%s</name>\n"
@@ -1252,7 +1273,7 @@ void COPROC_AMD::write_xml(MIOFILE& f, bool scheduler_rpc) {
             "      <peak_flops_dp>%f</peak_flops_dp>\n"
             "      <total_ram>%f</total_ram>\n"
             "   </device>\n",
-            d.name, d.gcn_arch, d.gfx_target_version, d.device_num,
+            name_escaped, arch_escaped, d.gfx_target_version, d.device_num,
             d.hip_version, d.have_hip ? 1 : 0,
             d.have_fp64 ? 1 : 0, d.peak_flops,
             d.peak_flops_dp, d.total_ram
@@ -1303,8 +1324,8 @@ int COPROC_AMD::parse(XML_PARSER& xp) {
             COPROC_AMD_DEVICE d;
             while (!xp.get_tag()) {
                 if (xp.match_tag("/device")) break;
-                if (xp.parse_str("name", d.name, sizeof(d.name))) continue;
-                if (xp.parse_str("gcn_arch", d.gcn_arch, sizeof(d.gcn_arch))) continue;
+                if (parse_escaped_name(xp, "name", d.name, sizeof(d.name))) continue;
+                if (parse_escaped_name(xp, "gcn_arch", d.gcn_arch, sizeof(d.gcn_arch))) continue;
                 if (xp.parse_int("gfx_target_version", d.gfx_target_version)) continue;
                 if (xp.parse_int("device_num", d.device_num)) continue;
                 if (xp.parse_int("hip_version", d.hip_version)) continue;
@@ -1627,6 +1648,9 @@ void COPROC_INTEL::write_xml(MIOFILE& f, bool scheduler_rpc) {
 
     for (unsigned int i=0; i<devices.size(); i++) {
         const GPU_DEVICE& d = devices[i];
+        // The name comes from the driver and can contain '&' or '<'.
+        char name_escaped[1600];
+        xml_escape(d.name, name_escaped, sizeof(name_escaped));
         f.printf(
             "   <device>\n"
             "      <name>%s</name>\n"
@@ -1638,7 +1662,7 @@ void COPROC_INTEL::write_xml(MIOFILE& f, bool scheduler_rpc) {
             "      <peak_flops_dp>%f</peak_flops_dp>\n"
             "      <total_ram>%f</total_ram>\n"
             "   </device>\n",
-            d.name, d.device_num, d.driver_version, d.opencl_version,
+            name_escaped, d.device_num, d.driver_version, d.opencl_version,
             d.have_fp64 ? 1 : 0, d.peak_flops, d.peak_flops_dp, d.total_ram
         );
     }
@@ -1676,7 +1700,7 @@ int COPROC_INTEL::parse(XML_PARSER& xp) {
             GPU_DEVICE d;
             while (!xp.get_tag()) {
                 if (xp.match_tag("/device")) break;
-                if (xp.parse_str("name", d.name, sizeof(d.name))) continue;
+                if (parse_escaped_name(xp, "name", d.name, sizeof(d.name))) continue;
                 if (xp.parse_int("device_num", d.device_num)) continue;
                 if (xp.parse_int("driver_version", d.driver_version)) continue;
                 if (xp.parse_int("opencl_version", d.opencl_version)) continue;
@@ -1776,6 +1800,9 @@ void COPROC_APPLE::write_xml(MIOFILE& f, bool scheduler_rpc) {
 
     for (unsigned int i=0; i<devices.size(); i++) {
         const GPU_DEVICE& d = devices[i];
+        // The name comes from the driver and can contain '&' or '<'.
+        char name_escaped[1600];
+        xml_escape(d.name, name_escaped, sizeof(name_escaped));
         f.printf(
             "   <device>\n"
             "      <name>%s</name>\n"
@@ -1785,7 +1812,7 @@ void COPROC_APPLE::write_xml(MIOFILE& f, bool scheduler_rpc) {
             "      <peak_flops>%f</peak_flops>\n"
             "      <total_ram>%f</total_ram>\n"
             "   </device>\n",
-            d.name, d.device_num, d.metal_support, d.ncores,
+            name_escaped, d.device_num, d.metal_support, d.ncores,
             d.peak_flops, d.total_ram
         );
     }
@@ -1822,7 +1849,7 @@ int COPROC_APPLE::parse(XML_PARSER& xp) {
             GPU_DEVICE d;
             while (!xp.get_tag()) {
                 if (xp.match_tag("/device")) break;
-                if (xp.parse_str("name", d.name, sizeof(d.name))) continue;
+                if (parse_escaped_name(xp, "name", d.name, sizeof(d.name))) continue;
                 if (xp.parse_int("device_num", d.device_num)) continue;
                 if (xp.parse_int("metal_support", d.metal_support)) continue;
                 if (xp.parse_int("ncores", d.ncores)) continue;

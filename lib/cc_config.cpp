@@ -567,6 +567,12 @@ int CC_CONFIG::write(MIOFILE& out, LOG_FLAGS& log_flags) {
         out.printf("</device_nums>\n");
         for (unsigned int d=0; d<config_coprocs.coprocs[k].devices.size(); d++) {
             const GPU_DEVICE& g = config_coprocs.coprocs[k].devices[d];
+            // The name is operator- or driver-supplied and may contain '&' or
+            // '<'; escape it so the file we write can be parsed back.  Same
+            // rule and buffer size as the coproc_info.xml writers.
+            //
+            char name_escaped[1600];
+            xml_escape(g.name, name_escaped, sizeof(name_escaped));
             out.printf(
                 "            <device>\n"
                 "                <name>%s</name>\n"
@@ -576,7 +582,7 @@ int CC_CONFIG::write(MIOFILE& out, LOG_FLAGS& log_flags) {
                 "                <peak_flops_dp>%f</peak_flops_dp>\n"
                 "                <total_ram>%f</total_ram>\n"
                 "            </device>\n",
-                g.name,
+                name_escaped,
                 g.device_num,
                 g.have_fp64?1:0,
                 g.peak_flops,
