@@ -1772,11 +1772,27 @@ int CMainDocument::fix_slot_file_owners(int slot) {
 #endif
 
 
+// The URL comes from the project (the scheduler's web_graphics_url) and is
+// handed to the system browser, so allow only the two schemes a graphics
+// app can legitimately need.  Anything else - file:, javascript:, or a
+// Windows path with a drive letter - could launch a local handler.
+//
+static bool valid_web_url(const wxString& url) {
+    wxString u = url;
+    u.Trim(true).Trim(false);
+    if (u.IsEmpty()) return false;
+    return u.StartsWith(wxT("http://")) || u.StartsWith(wxT("https://"));
+}
+
 int CMainDocument::WorkShowGraphics(RESULT* rp) {
     int iRetVal = 0;
 
     if (strlen(rp->web_graphics_url)) {
         wxString url(rp->web_graphics_url, wxConvUTF8);
+        if (!valid_web_url(url)) {
+            wxLogError(_("Invalid graphics URL"));
+            return ERR_INVALID_PARAM;
+        }
         wxLaunchDefaultBrowser(url);
         return 0;
     }
