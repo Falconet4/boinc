@@ -118,6 +118,27 @@ int main(int /*argc*/, char** argv) {
     while(argv[i]) {
         if (!strcmp(argv[i], "--ScreensaverLoginUser")) {
             screensaverLoginUser = argv[i+1];
+            if (!screensaverLoginUser) {
+                fprintf(stderr, "switcher: missing --ScreensaverLoginUser value\n");
+                _exit(1);
+            }
+            if (screensaverLoginUser[0] == '-') {
+                // su would parse a leading dash as an option.
+                fprintf(stderr, "switcher: invalid --ScreensaverLoginUser\n");
+                _exit(1);
+            }
+            // The value is interpolated into a root `su -l "... " -c` command
+            // line below; accept only characters that cannot escape it.
+            for (const char* p = screensaverLoginUser; *p; p++) {
+                char c = *p;
+                if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+                    || (c >= '0' && c <= '9') || c == '_' || c == '.'
+                    || c == '-')
+                ) {
+                    fprintf(stderr, "switcher: invalid --ScreensaverLoginUser\n");
+                    _exit(1);
+                }
+            }
             break;
         }
         ++i;
@@ -125,22 +146,62 @@ int main(int /*argc*/, char** argv) {
 #endif
 
     if (!screensaverLoginUser) {
-        // Satisfy an error / warning from rpmlint: ensure that
-        // we drop any supplementary groups associated with root
-        setgroups(0, NULL);
+        // switcher is installed either setuid root (macOS, RPM) or setuid and
+        // setgid to the project user (the generic installer uses mode 6551,
+        // owner boinc_project).  In the second case the kernel has already
+        // switched us and setgroups() is not permitted.
+        //
+        // If any part of the privilege drop fails we must not execute the
+        // project-supplied application, which would otherwise inherit our
+        // identity.
+        //
+        bool privileged = (geteuid() == 0);
 
-        // We are running setuid root, so setgid() sets real group ID,
-        // effective group ID and saved set_group-ID for this process
         grp = getgrnam(boinc_project_group_name);
-        if (grp) {
-            (void) setgid(grp->gr_gid);
+        if (!grp) {
+            fprintf(stderr, "switcher: no such group: %s\n", boinc_project_group_name);
+            _exit(1);
+        }
+        pw = getpwnam(boinc_project_user_name);
+        if (!pw) {
+            fprintf(stderr, "switcher: no such user: %s\n", boinc_project_user_name);
+            _exit(1);
         }
 
-        // We are running setuid root, so setuid() sets real user ID,
-        // effective user ID and saved set_user-ID for this process
-        pw = getpwnam(boinc_project_user_name);
-        if (pw) {
-            (void) setuid(pw->pw_uid);
+        if (privileged) {
+            if (setgroups(0, NULL)) {
+                fprintf(stderr, "switcher: setgroups() failed: %s\n", strerror(errno));
+                _exit(1);
+            }
+
+            // Running setuid root: setgid() and setuid() set the real,
+            // effective and saved IDs for this process.
+            if (setgid(grp->gr_gid)) {
+                fprintf(stderr, "switcher: setgid(%d) failed: %s\n", (int)grp->gr_gid, strerror(errno));
+                _exit(1);
+            }
+            if (setuid(pw->pw_uid)) {
+                fprintf(stderr, "switcher: setuid(%d) failed: %s\n", (int)pw->pw_uid, strerror(errno));
+                _exit(1);
+            }
+            if (getuid() != pw->pw_uid || getgid() != grp->gr_gid) {
+                fprintf(stderr, "switcher: privilege drop did not take effect\n");
+                _exit(1);
+            }
+        } else {
+            // Setuid/setgid install: verify the identity the kernel gave us.
+            if (geteuid() != pw->pw_uid || getegid() != grp->gr_gid) {
+                fprintf(stderr, "switcher: not running as %s:%s\n",
+                    boinc_project_user_name, boinc_project_group_name
+                );
+                _exit(1);
+            }
+            // Clear the caller's supplementary groups if permitted; passing
+            // them on would let the application reach BOINC's data directory.
+            if (setgroups(0, NULL) && errno != EPERM) {
+                fprintf(stderr, "switcher: setgroups() failed: %s\n", strerror(errno));
+                _exit(1);
+            }
         }
     }
 
@@ -216,6 +277,21 @@ int main(int /*argc*/, char** argv) {
         setgid(getegid());
 
         getcwd(current_dir, sizeof(current_dir));
+
+        // These arguments are interpolated into a shell command run as
+        // root.  Reject characters that can escape the quoting; spaces
+        // and normal path characters remain allowed.
+        //
+        for (int k=1; argv[k]; k++) {
+            for (const char* p=argv[k]; *p; p++) {
+                if (*p=='\'' || *p=='"' || *p=='`' || *p=='$'
+                    || *p=='\\' || *p=='\n' || *p=='\r'
+                ) {
+                    fprintf(stderr, "switcher: invalid graphics argument\n");
+                    _exit(1);
+                }
+            }
+        }
 
         i = 0;
         while(argv[i]) {

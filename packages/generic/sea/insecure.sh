@@ -28,10 +28,10 @@
 # Execute this as root in the BOINC directory
 
 remove_boinc_users() {
-	userdel boinc_master
-	userdel boinc_projects
-	groupdel boinc_master
-	groupdel boinc_projects
+	userdel boinc_master 2>/dev/null || true
+	userdel boinc_project 2>/dev/null || true
+	groupdel boinc_master 2>/dev/null || true
+	groupdel boinc_project 2>/dev/null || true
 }
 
 check_login() {
@@ -72,5 +72,5 @@ fi
 
 chown -R ${user}:${group} .
 chmod -R u+rw-s,g+r-w-s,o+r-w .
-chmod 600 gui_rpc_auth.cfg
+if [ -f gui_rpc_auth.cfg ]; then chmod 600 gui_rpc_auth.cfg; fi
 remove_boinc_users

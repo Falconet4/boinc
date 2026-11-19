@@ -26,16 +26,16 @@
 # You must have already run the installer script
 # that creates the switcher/ and locale/ directories, and their contents
 
-# In addition, you should add boinc_master and boinc_projects
+# In addition, you should add boinc_master and boinc_project
 # to the supplementary group list of users who will administer BOINC.
 # e.g.:
-# usermod -G boinc_master,boinc_projects -a mary
+# usermod -G boinc_master,boinc_project -a mary
 
 make_boinc_users() {
-    groupadd boinc_master
-    groupadd boinc_projects
-    useradd boinc_master -g boinc_master
-    useradd boinc_projects -g boinc_projects
+    groupadd -f boinc_master
+    groupadd -f boinc_project
+    id -u boinc_master >/dev/null 2>&1 || useradd boinc_master -g boinc_master
+    id -u boinc_project >/dev/null 2>&1 || useradd boinc_project -g boinc_project
 }
 
 check_login() {
@@ -120,7 +120,7 @@ if [ -d slots ] ; then
 fi
 
 set_perm switcher/switcher boinc_project boinc_project 6551
-set_perm switcher/setprojectgrp boinc_master boinc_project 2500
+set_perm switcher/setprojectgrp boinc_master boinc_project 2550
 set_perm switcher boinc_master boinc_master 0550
 
 set_perm_recursive locale boinc_master boinc_master u+r-w,g+r-w,o-rwx

@@ -756,19 +756,18 @@ static int boinc_rename_aux(const char* old, const char* newf) {
     return GetLastError();
 #else
     // rename() doesn't work between filesystems.
-    // So if it fails, try the "mv" command, which does work
+    // Copy and unlink instead of running "mv": file names can come from
+    // project-supplied XML and may contain shell metacharacters.
     //
     int retval = rename(old, newf);
     if (retval) {
-        char buf[MAXPATHLEN+MAXPATHLEN];
-        snprintf(buf, sizeof(buf), "mv \"%s\" \"%s\"", old, newf);
-#ifdef __APPLE__
-        // system() is deprecated in Mac OS 10.10.
-        // Apple says to call posix_spawn instead.
-        retval = callPosixSpawn(buf);
-#else
-        retval = system(buf);
-#endif
+        struct stat sbuf;
+        if (lstat(old, &sbuf)) return ERR_STAT;
+        if (!S_ISREG(sbuf.st_mode)) return ERR_RENAME;
+        retval = boinc_copy(old, newf);
+        if (retval) return retval;
+        (void) boinc_copy_attributes(old, newf);
+        retval = boinc_delete_file(old);
     }
     if (retval) return ERR_RENAME;
     return 0;
