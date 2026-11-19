@@ -1,0 +1,126 @@
+name: sanitizers
+
+# Build the client with AddressSanitizer and UndefinedBehaviorSanitizer
+# and run the GPU-detection path.  This is a smoke test intended to
+# catch the classes of bug that ordinary compilation does not: buffer
+# overruns, use-after-free and integer/pointer undefined behaviour.
+
+on:
+  pull_request:
+    paths:
+      - 'client/**'
+      - 'lib/**'
+      - 'api/**'
+      - 'configure.ac'
+      - 'Makefile.am'
+      - '**/Makefile.am'
+      - '**/*.am'
+      - 'Makefile.incl'
+      - 'version.h'
+      - 'project_specific_defines.h'
+      - 'm4/**'
+      - '_autosetup'
+      - '.github/workflows/sanitizers.yml'
+  push:
+    branches: [master]
+    paths:
+      - 'client/**'
+      - 'lib/**'
+      - 'api/**'
+      - 'configure.ac'
+      - 'Makefile.am'
+      - '**/Makefile.am'
+      - '**/*.am'
+      - 'Makefile.incl'
+      - 'version.h'
+      - 'project_specific_defines.h'
+      - 'm4/**'
+      - '_autosetup'
+      - '.github/workflows/sanitizers.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sanitizers-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  asan-ubsan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+
+    env:
+      CC: gcc
+      CXX: g++
+      CFLAGS: -O1 -g -fno-omit-frame-pointer -fsanitize=address,undefined
+      CXXFLAGS: -O1 -g -fno-omit-frame-pointer -fsanitize=address,undefined
+      LDFLAGS: -fsanitize=address,undefined
+      ASAN_OPTIONS: detect_leaks=0:abort_on_error=1
+      UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y autopoint m4 autoconf automake libtool \
+            libtool-bin autoconf-archive libcurl4-openssl-dev libssl-dev \
+            zlib1g-dev libnotify-dev libxss-dev libxmu-dev libxi-dev \
+            libxxf86vm-dev freeglut3-dev libftgl-dev libzip-dev libjpeg-dev \
+            nlohmann-json3-dev ocl-icd-opencl-dev pkg-config build-essential
+
+      - name: Configure
+        run: |
+          ./_autosetup
+          ./configure --disable-server --disable-manager
+
+      - name: Build
+        id: build
+        run: |
+          make -j"$(nproc)"
+          # A future flag regression must not leave this job green.
+          nm client/boinc | grep -q '__asan_init' || {
+            echo "client is not ASan-instrumented"; exit 1;
+          }
+          nm client/boinc | grep -q '__ubsan_handle' || {
+            echo "client is not UBSan-instrumented"; exit 1;
+          }
+
+      - name: GPU detection smoke test
+        run: |
+          mkdir -p "$RUNNER_TEMP/boinc-data"
+          ./client/boinc --dir "$RUNNER_TEMP/boinc-data" --detect_gpus
+          test -f "$RUNNER_TEMP/boinc-data/coproc_info.xml"
+          cat "$RUNNER_TEMP/boinc-data/coproc_info.xml"
+          # Fail on malformed output; the process exits 0 even when
+          # detection found nothing.
+          python3 -c "import os, xml.etree.ElementTree as ET; ET.parse(os.environ['RUNNER_TEMP'] + '/boinc-data/coproc_info.xml')"
+
+      - name: Show sanitizer output
+        if: always() && steps.build.outcome == 'success'
+        run: |
+          # diagnostics_init() redirects stdout/stderr into the data dir,
+          # so sanitizer reports end up in these files rather than the log.
+          # Missing files are also a failure: with no evidence this step
+          # would otherwise report "clean" while analysing nothing.
+          status=0
+          for f in "$RUNNER_TEMP/boinc-data"/stdoutgpudetect.txt \
+                   "$RUNNER_TEMP/boinc-data"/stderrgpudetect.txt; do
+            if [ ! -f "$f" ]; then
+              echo "missing diagnostics file: $f"
+              status=1
+              continue
+            fi
+            echo "===== $f ====="
+            cat "$f"
+            if grep -qE 'ERROR: (Address|Leak|Memory)Sanitizer|runtime error:|SUMMARY: (Address|Undefined)|SIGSEGV|SIGABRT|segmentation violation' "$f"; then
+              echo "sanitizer error reported in $f"
+              status=1
+            fi
+          done
+          exit $status
