@@ -20,6 +20,11 @@
 
 #include "BOINCGUIApp.h"
 
+// Alternate row colouring (zebra striping) in the Manager's list views.
+// Off by default; set to 1 to restore it.
+//
+#define BASEVIEW_STRIPES 0
+
 // Virtual wxListCtrl does not reliably generate selection and
 // deselection events, so we must check for these differently.
 // We get more events than we need using EVT_LIST_CACHE_HINT,

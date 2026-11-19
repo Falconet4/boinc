@@ -19,7 +19,8 @@
 #ifndef BOINC_DLGEVENTLOG_H
 #define BOINC_DLGEVENTLOG_H
 
-#define EVENT_LOG_STRIPES 1
+// Alternate row colouring in the Event Log.  Off; set to 1 to restore it.
+#define EVENT_LOG_STRIPES 0
 #define EVENT_LOG_RULES 1
 
 #if EVENT_LOG_RULES

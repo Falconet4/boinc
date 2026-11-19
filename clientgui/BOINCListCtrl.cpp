@@ -48,8 +48,9 @@ CBOINCListCtrl::CBOINCListCtrl(
 ) {
     m_pParentView = pView;
 
-    // Enable Zebra Striping
+#if BASEVIEW_STRIPES
     EnableAlternateRowColours(true);
+#endif
 
 #if USE_NATIVE_LISTCONTROL
     m_bProgressBarEventPending = false;
