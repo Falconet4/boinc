@@ -353,7 +353,7 @@ void device_json(char* buf, size_t len, const GPU_DEVICE& d) {
     );
 }
 
-static void ati_device_json(char* buf, size_t len, const COPROC_ATI_DEVICE& d) {
+static void amd_device_json(char* buf, size_t len, const COPROC_AMD_DEVICE& d) {
     char ename[4096], earch[4096];
     json_escape_string(d.name, ename, sizeof(ename));
     json_escape_string(d.gcn_arch, earch, sizeof(earch));
@@ -403,9 +403,9 @@ static void append_vendor_devices(
 void COPROCS::devices_string_json(string& out) {
     out = "";
     char buf[8192];
-    for (const COPROC_ATI_DEVICE& d: ati.devices) {
+    for (const COPROC_AMD_DEVICE& d: amd.devices) {
         if (out.size() > MAX_DEVICES_JSON) return;
-        ati_device_json(buf, sizeof(buf), d);
+        amd_device_json(buf, sizeof(buf), d);
         if (!out.empty()) out += ",\n";
         out += buf;
     }
@@ -434,14 +434,14 @@ void COPROCS::summary_string_json(string &out) {
         );
         out += buf2;
     }
-    if (ati.count) {
+    if (amd.count) {
         if (!out.empty()) out += ",\n";
         summary_json(buf2, sizeof(buf2),
             "amd",
-            ati.name, ati.count,
-            ati.attribs.localRAM, ati.version,
-            ati.opencl_prop.opencl_device_version_int,
-            ati.have_hip, ati.gcn_arch, ati.hip_version
+            amd.name, amd.count,
+            (int)(amd.total_ram/MEGA), amd.have_hip?"HIP":(amd.have_opencl?"OpenCL":"unknown"),
+            amd.opencl_prop.opencl_device_version_int,
+            amd.have_hip, amd.gcn_arch, amd.hip_version
         );
         out += buf2;
     }
@@ -507,12 +507,12 @@ void COPROC::check_count(const char* ctype) {
 // member the rest of the code reads, but only when that member is empty so
 // a vendor-specific tag elsewhere in the document still wins.
 //
-static void promote_generic_to_ati(COPROC& src, COPROC_ATI& dst) {
+static void promote_generic_to_amd(COPROC& src, COPROC_AMD& dst) {
     static_cast<COPROC&>(dst) = src;
     dst.devices.clear();
     for (unsigned int i=0; i<src.devices.size(); i++) {
         const GPU_DEVICE& g = src.devices[i];
-        COPROC_ATI_DEVICE d;
+        COPROC_AMD_DEVICE d;
         safe_strcpy(d.name, g.name);
         d.device_num = g.device_num;
         d.have_fp64 = g.have_fp64;
@@ -529,7 +529,7 @@ void COPROCS::promote_generic(COPROC& cp) {
         if (!nvidia.count) static_cast<COPROC&>(nvidia) = cp;
         break;
     case PROC_TYPE_AMD_GPU:
-        if (!ati.count) promote_generic_to_ati(cp, ati);
+        if (!amd.count) promote_generic_to_amd(cp, amd);
         break;
     case PROC_TYPE_INTEL_GPU:
         if (!intel_gpu.count) static_cast<COPROC&>(intel_gpu) = cp;
@@ -565,12 +565,12 @@ int COPROCS::parse(XML_PARSER& xp) {
             continue;
         }
         if (xp.match_tag("coproc_ati")) {
-            retval = ati.parse(xp);
+            retval = amd.parse(xp);
             if (retval) {
-                ati.clear();
+                amd.clear();
             } else {
                 if (n_rsc < MAX_RSC) {
-                    coprocs[n_rsc++] = ati;
+                    coprocs[n_rsc++] = amd;
                 }
             }
             continue;
@@ -631,7 +631,7 @@ void COPROCS::write_xml(MIOFILE& mf, bool scheduler_rpc) {
             nvidia.write_xml(mf, scheduler_rpc);
             break;
         case PROC_TYPE_AMD_GPU:
-            ati.write_xml(mf, scheduler_rpc);
+            amd.write_xml(mf, scheduler_rpc);
             break;
         case PROC_TYPE_INTEL_GPU:
             intel_gpu.write_xml(mf, scheduler_rpc);
@@ -1128,7 +1128,7 @@ void COPROC_NVIDIA::set_peak_flops() {
         // No FP64 ratio applies: either the compute capability is unknown
         // (no CUDA properties and no NVIDIA extension) or the table does
         // not cover the architecture.  Fall back to what OpenCL reports,
-        // matching COPROC_ATI::set_peak_flops(): the device may still
+        // matching COPROC_AMD::set_peak_flops(): the device may still
         // support FP64.
         //
         have_fp64 = (opencl_prop.double_fp_config != 0);
@@ -1179,13 +1179,12 @@ void COPROC_NVIDIA::fake(
 ////////////////// ATI STARTS HERE /////////////////
 
 #ifndef _USING_FCGI_
-void COPROC_ATI::write_xml(MIOFILE& f, bool scheduler_rpc) {
+void COPROC_AMD::write_xml(MIOFILE& f, bool scheduler_rpc) {
     f.printf(
         "<coproc_ati>\n"
         "   <count>%d</count>\n"
         "   <name>%s</name>\n"
         "   <available_ram>%f</available_ram>\n"
-        "   <have_cal>%d</have_cal>\n"
         "   <have_opencl>%d</have_opencl>\n"
         "   <have_hip>%d</have_hip>\n"
         "   <hip_version>%d</hip_version>\n"
@@ -1198,7 +1197,6 @@ void COPROC_ATI::write_xml(MIOFILE& f, bool scheduler_rpc) {
         count,
         name,
         available_ram,
-        have_cal ? 1 : 0,
         have_opencl ? 1 : 0,
         have_hip ? 1 : 0,
         hip_version,
@@ -1216,55 +1214,31 @@ void COPROC_ATI::write_xml(MIOFILE& f, bool scheduler_rpc) {
         "   <peak_flops>%f</peak_flops>\n"
         "   <peak_flops_dp>%f</peak_flops_dp>\n"
         "   <have_fp64>%d</have_fp64>\n"
-        "   <CALVersion>%s</CALVersion>\n"
-        "   <target>%d</target>\n"
+        // These four describe the GPU, not CAL, and a client that still
+        // detects through CAL reports them.  Keep writing them so such a
+        // client can read the record; nothing on this side consumes them.
+        //
         "   <localRAM>%d</localRAM>\n"
-        "   <uncachedRemoteRAM>%d</uncachedRemoteRAM>\n"
-        "   <cachedRemoteRAM>%d</cachedRemoteRAM>\n"
-        "   <engineClock>%u</engineClock>\n"
-        "   <memoryClock>%d</memoryClock>\n"
+        "   <engineClock>%d</engineClock>\n"
         "   <wavefrontSize>%d</wavefrontSize>\n"
         "   <numberOfSIMD>%d</numberOfSIMD>\n"
-        "   <doublePrecision>%d</doublePrecision>\n"
-        "   <pitch_alignment>%d</pitch_alignment>\n"
-        "   <surface_alignment>%d</surface_alignment>\n"
-        "   <maxResource1DWidth>%d</maxResource1DWidth>\n"
-        "   <maxResource2DWidth>%d</maxResource2DWidth>\n"
-        "   <maxResource2DHeight>%d</maxResource2DHeight>\n",
+        "   <doublePrecision>%d</doublePrecision>\n",
         peak_flops,
         peak_flops_dp,
         have_fp64 ? 1 : 0,
-        version,
-        attribs.target,
-        attribs.localRAM,
-        attribs.uncachedRemoteRAM,
-        attribs.cachedRemoteRAM,
-        attribs.engineClock,
-        attribs.memoryClock,
-        attribs.wavefrontSize,
-        attribs.numberOfSIMD,
-        attribs.doublePrecision,
-        attribs.pitch_alignment,
-        attribs.surface_alignment,
-        info.maxResource1DWidth,
-        info.maxResource2DWidth,
-        info.maxResource2DHeight
+        (int)(total_ram/MEGA),
+        engine_clock_mhz,
+        wavefront_size,
+        simd_count,
+        double_precision
     );
-
-    if (atirt_detected) {
-        f.printf("    <atirt_detected/>\n");
-    }
-
-    if (amdrt_detected) {
-        f.printf("    <amdrt_detected/>\n");
-    }
 
     if (have_opencl) {
         opencl_prop.write_xml(f, "coproc_opencl");
     }
 
     for (unsigned int i=0; i<devices.size(); i++) {
-        const COPROC_ATI_DEVICE& d = devices[i];
+        const COPROC_AMD_DEVICE& d = devices[i];
         f.printf(
             "   <device>\n"
             "      <name>%s</name>\n"
@@ -1289,16 +1263,17 @@ void COPROC_ATI::write_xml(MIOFILE& f, bool scheduler_rpc) {
 }
 #endif
 
-void COPROC_ATI::clear() {
-    static const COPROC_ATI x(0);
+void COPROC_AMD::clear() {
+    static const COPROC_AMD x(0);
     *this = x;
     safe_strcpy(type, proc_type_name_xml(PROC_TYPE_AMD_GPU));
     estimated_delay = -1;
     safe_strcpy(name, "");
-    safe_strcpy(version, "");
-    atirt_detected = false;
-    amdrt_detected = false;
-    version_num = 0;
+    total_ram = 0;
+    simd_count = 0;
+    wavefront_size = 0;
+    engine_clock_mhz = 0;
+    double_precision = 0;
     have_hip = false;
     hip_version = 0;
     hip_device_num = -1;
@@ -1318,14 +1293,14 @@ void COPROC_ATI::clear() {
     is_used = COPROC_USED;
 }
 
-int COPROC_ATI::parse(XML_PARSER& xp) {
+int COPROC_AMD::parse(XML_PARSER& xp) {
     int n, retval;
 
     clear();
 
     while (!xp.get_tag()) {
         if (xp.match_tag("device")) {
-            COPROC_ATI_DEVICE d;
+            COPROC_AMD_DEVICE d;
             while (!xp.get_tag()) {
                 if (xp.match_tag("/device")) break;
                 if (xp.parse_str("name", d.name, sizeof(d.name))) continue;
@@ -1345,26 +1320,17 @@ int COPROC_ATI::parse(XML_PARSER& xp) {
             continue;
         }
         if (xp.match_tag("/coproc_ati")) {
-            if (strlen(version)) {
-                int major, minor, release;
-                n = sscanf(version, "%d.%d.%d", &major, &minor, &release);
-                if (n ==3) {
-                    version_num = ati_version_int(major, minor, release);
-                }
-            }
-
             if (!peak_flops) {
-				set_peak_flops();
+                set_peak_flops();
             }
             if (!available_ram) {
-                available_ram = attribs.localRAM*MEGA;
+                available_ram = total_ram;
             }
             check_count("AMD");
             return 0;
         }
         if (xp.parse_int("count", count)) continue;
         if (xp.parse_double("peak_flops", peak_flops)) continue;
-        if (xp.parse_bool("have_cal", have_cal)) continue;
         if (xp.parse_bool("have_opencl", have_opencl)) continue;
         if (xp.parse_bool("have_hip", have_hip)) continue;
         if (xp.parse_double("peak_flops_dp", peak_flops_dp)) continue;
@@ -1385,64 +1351,29 @@ int COPROC_ATI::parse(XML_PARSER& xp) {
         if (xp.parse_double("req_instances", req_instances)) continue;
         if (xp.parse_double("estimated_delay", estimated_delay)) continue;
         if (xp.parse_str("name", name, sizeof(name))) continue;
-        if (xp.parse_str("CALVersion", version, sizeof(version))) continue;
-        if (xp.parse_bool("amdrt_detected", amdrt_detected)) continue;
-        if (xp.parse_bool("atirt_detected", atirt_detected)) continue;
-
-        if (xp.parse_int("target", n)) {
-            attribs.target = (CALtarget)n;
-            continue;
-        }
+        // localRAM, engineClock, wavefrontSize, numberOfSIMD and
+        // doublePrecision are read because a client that still detects
+        // through CAL reports its device attributes with those names.
+        // They describe the GPU, not CAL, so they outlive it.
+        //
         if (xp.parse_int("localRAM", n)) {
-            attribs.localRAM = n;
-            continue;
-        }
-        if (xp.parse_int("uncachedRemoteRAM", n)) {
-            attribs.uncachedRemoteRAM = n;
-            continue;
-        }
-        if (xp.parse_int("cachedRemoteRAM", n)) {
-            attribs.cachedRemoteRAM = n;
+            total_ram = (double)n * MEGA;
             continue;
         }
         if (xp.parse_int("engineClock", n)) {
-            attribs.engineClock = n;
-            continue;
-        }
-        if (xp.parse_int("memoryClock", n)) {
-            attribs.memoryClock = n;
+            engine_clock_mhz = n;
             continue;
         }
         if (xp.parse_int("wavefrontSize", n)) {
-            attribs.wavefrontSize = n;
+            wavefront_size = n;
             continue;
         }
-        if (xp.parse_int("numberOfSIMD"  , n)) {
-            attribs.numberOfSIMD = n;
+        if (xp.parse_int("numberOfSIMD", n)) {
+            simd_count = n;
             continue;
         }
         if (xp.parse_int("doublePrecision", n)) {
-            attribs.doublePrecision = n?CAL_TRUE:CAL_FALSE;
-            continue;
-        }
-        if (xp.parse_int("pitch_alignment", n)) {
-            attribs.pitch_alignment = n;
-            continue;
-        }
-        if (xp.parse_int("surface_alignment", n)) {
-            attribs.surface_alignment = n;
-            continue;
-        }
-        if (xp.parse_int("maxResource1DWidth", n)) {
-            info.maxResource1DWidth = n;
-            continue;
-        }
-        if (xp.parse_int("maxResource2DWidth", n)) {
-            info.maxResource2DWidth = n;
-            continue;
-        }
-        if (xp.parse_int("maxResource2DHeight", n)) {
-            info.maxResource2DHeight = n;
+            double_precision = n;
             continue;
         }
         if (xp.match_tag("coproc_opencl")) {
@@ -1472,15 +1403,15 @@ void format_hip_version(int v, char* buf, int buflen) {
 // OpenCL-only host falls back to the AMD OpenCL device list.  Every value
 // is total, not free: the report is for capabilities, not packing.
 //
-void COPROC_ATI::set_devices(
-    const std::vector<COPROC_ATI>& hip,
+void COPROC_AMD::set_devices(
+    const std::vector<COPROC_AMD>& hip,
     const std::vector<OPENCL_DEVICE_PROP>& ocl
 ) {
     devices.clear();
     if (!hip.empty()) {
         for (unsigned int i=0; i<hip.size(); i++) {
-            const COPROC_ATI& h = hip[i];
-            COPROC_ATI_DEVICE d;
+            const COPROC_AMD& h = hip[i];
+            COPROC_AMD_DEVICE d;
             safe_strcpy(d.name, h.name);
             safe_strcpy(d.gcn_arch, h.gcn_arch);
             if (!d.name[0]) {
@@ -1493,7 +1424,7 @@ void COPROC_ATI::set_devices(
             d.have_fp64 = h.have_fp64;
             d.peak_flops = h.peak_flops;
             d.peak_flops_dp = h.peak_flops_dp;
-            d.total_ram = (double)h.attribs.localRAM * MEGA;
+            d.total_ram = h.total_ram;
             if (!d.total_ram) {
                 d.total_ram = h.opencl_prop.global_mem_size;
             }
@@ -1503,7 +1434,7 @@ void COPROC_ATI::set_devices(
     }
     for (unsigned int i=0; i<ocl.size(); i++) {
         const OPENCL_DEVICE_PROP& o = ocl[i];
-        COPROC_ATI_DEVICE d;
+        COPROC_AMD_DEVICE d;
         safe_strcpy(d.name, o.name);
         d.device_num = o.device_num;
         d.have_fp64 = o.have_fp64 || (o.double_fp_config != 0);
@@ -1520,7 +1451,7 @@ void COPROC_ATI::set_devices(
     }
 }
 
-void COPROC_ATI::description(char* buf, int buflen) {
+void COPROC_AMD::description(char* buf, int buflen) {
     char dp[64];
     char hip_ver[32];
     if (peak_flops_dp > 0) {
@@ -1535,7 +1466,7 @@ void COPROC_ATI::description(char* buf, int buflen) {
         snprintf(buf, buflen,
             "%s (HIP version %s, %s, %.2fGB, %.2fGB available, %s peak%s)",
             name, hip_ver, gcn_arch[0] ? gcn_arch : "unknown arch",
-            attribs.localRAM/1024., available_ram/GIGA,
+            total_ram/GIGA, available_ram/GIGA,
             flops_to_string(peak_flops).c_str(), dp
         );
         return;
@@ -1543,19 +1474,19 @@ void COPROC_ATI::description(char* buf, int buflen) {
     if (have_opencl) {
         snprintf(buf, buflen,
             "%s (OpenCL, %.2fGB, %.2fGB available, %s peak%s)",
-            name, attribs.localRAM/1024., available_ram/GIGA,
+            name, total_ram/GIGA, available_ram/GIGA,
             flops_to_string(peak_flops).c_str(), dp
         );
         return;
     }
     snprintf(buf, buflen,
-        "%s (CAL version %s, %.2fGB, %.2fGB available, %s peak%s)",
-        name, version, attribs.localRAM/1024.,
-        available_ram/GIGA, flops_to_string(peak_flops).c_str(), dp
+        "%s (%.2fGB, %.2fGB available, %s peak%s)",
+        name, total_ram/GIGA, available_ram/GIGA,
+        flops_to_string(peak_flops).c_str(), dp
     );
 }
 
-void COPROC_ATI::set_peak_flops() {
+void COPROC_AMD::set_peak_flops() {
     double x = 0;
     if (have_hip && hip_clock_khz > 0 && (hip_lane_count > 0 || hip_cu_count > 0)) {
         // Number of FP32 lanes.  KFD gives it directly (simd_count x
@@ -1566,13 +1497,8 @@ void COPROC_ATI::set_peak_flops() {
         //
         int lanes = hip_lane_count;
         if (!lanes && hip_cu_count) {
-            int lanes_per_cu = 64;
-            if (hip_warp_size == 32 || (!hip_warp_size && gfxip_major >= 10)) {
-                lanes_per_cu = 128;     // RDNA: HIP reports one WGP
-            } else if (gfxip_major == 9 && gfx_target_version >= 90400) {
-                lanes_per_cu = 128;     // CDNA 3/4
-            }
-            lanes = hip_cu_count * lanes_per_cu;
+            lanes = hip_cu_count
+                * hip_lanes_per_cu(hip_warp_size, gfxip_major, gfx_target_version);
         }
         // One FMA per lane per clock is 2 FLOPs; RDNA 3+ (gfx11/gfx12)
         // dual-issues FP32, i.e. 4 FLOPs.  If the architecture is
@@ -1581,8 +1507,8 @@ void COPROC_ATI::set_peak_flops() {
         double flops_per_lane_per_clock = (gfxip_major >= 11) ? 4. : 2.;
         x = (double)lanes * flops_per_lane_per_clock
             * (hip_clock_khz * 1.e3);
-    } else if (attribs.numberOfSIMD) {
-        x = attribs.numberOfSIMD * attribs.wavefrontSize * 5 * attribs.engineClock * 1.e6;
+    } else if (simd_count) {
+        x = simd_count * wavefront_size * 5 * engine_clock_mhz * 1.e6;
         // clock is in MHz
     } else if (opencl_prop.amd_simd_per_compute_unit) {
 
@@ -1630,7 +1556,7 @@ void COPROC_ATI::set_peak_flops() {
     } else if (opencl_prop.max_compute_units) {
         // OpenCL gives us only:
         // - max_compute_units
-        //   (which I'll assume is the same as attribs.numberOfSIMD)
+        //   (which I'll assume is the same as simd_count)
         // - max_clock_frequency (which I'll assume is the same as engineClock)
         // It doesn't give wavefrontSize, which can be 16/32/64.
         // So let's be conservative and use 16
@@ -1648,22 +1574,20 @@ void COPROC_ATI::set_peak_flops() {
         have_fp64 = true;
     } else if (x > 0) {
         // Rate unknown, but the device may still support FP64.
-        have_fp64 = (opencl_prop.double_fp_config != 0) || attribs.doublePrecision;
+        have_fp64 = (opencl_prop.double_fp_config != 0) || double_precision;
     }
 }
 
-void COPROC_ATI::fake(double ram, double avail_ram, int n) {
+void COPROC_AMD::fake(double ram, double avail_ram, int n) {
     clear();
     safe_strcpy(type, proc_type_name_xml(PROC_TYPE_AMD_GPU));
-    safe_strcpy(version, "1.4.3");
     safe_strcpy(name, "foobar");
     count = n;
     available_ram = avail_ram;
-    have_cal = true;
-    attribs.localRAM = (int)(ram/MEGA);
-    attribs.numberOfSIMD = 32;
-    attribs.wavefrontSize = 32;
-    attribs.engineClock = 50;
+    total_ram = ram;
+    simd_count = 32;
+    wavefront_size = 32;
+    engine_clock_mhz = 50;
     for (int i=0; i<count; i++) {
         device_nums[i] = i;
     }

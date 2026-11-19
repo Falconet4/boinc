@@ -263,7 +263,7 @@ int OPENCL_DEVICE_PROP::get_opencl_driver_revision() {
       int n=sscanf(
           p, "(%f", &rev
       );
-      // I don't care about errors because for non-ATI GPUs this should
+      // I don't care about errors because for non-AMD GPUs this should
       // be zero.
       if (n!=1) {
         rev=0;

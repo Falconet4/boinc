@@ -19,7 +19,7 @@
 //
 // Theory of operation:
 // There are two ways of detecting GPUs:
-//  - vendor-specific libraries like CUDA and CAL,
+//  - vendor-specific libraries like CUDA and HIP,
 //      which detect only that vendor's GPUs
 //  - OpenCL, which can detect multiple types of GPUs:
 //      nvidia, amd, intel, apple and new types
@@ -44,7 +44,7 @@
 // Data structures (lib/coproc.h):
 // OPENCL_DEVICE_PROP: OpenCL info for a GPU
 // COPROC: base class for a GPU, including OpenCL info
-// COPROC_ATI etc.: derived classes including vendor-specific info
+// COPROC_AMD etc.: derived classes including vendor-specific info
 // COPROCS: a vector of COPROC objects,
 //      together with an instance of each vendor-specific type
 //
@@ -56,28 +56,28 @@
 // and a list of IDs (native, OpenCL, PCI) for the qualifying GPU instances.
 //
 // The client parses coproc_info.xml into a bunch of vectors:
-//      ati_gpus, etc: COPROC_* objects
-//      api_opencls, etc: OPENCL_DEVICE_PROPs for ATI GPUs
+//      amd_gpus, etc: COPROC_* objects
+//      api_opencls, etc: OPENCL_DEVICE_PROPs for AMD GPUs
 //      other_opencls: OPENCL_DEVICE_PROPs for other GPUs
 //
 // Then (COPROCS::correlate_gpus):
-// for each vendor (e.g. COPROC_ATI::correlate()):
-//   scan ati_gpus and find the most capable GPU.
-//   Copy its object to COPROCS.ati_gpu.
+// for each vendor (e.g. COPROC_AMD::correlate()):
+//   scan amd_gpus and find the most capable GPU.
+//   Copy its object to COPROCS.amd.
 //   Scan the list again, identifying equivalent instances,
 //   incrementing count, getting IDs
 // Then (COPROCS::correlate_opencl())
-// For each vendor (e.g. ATI)
-//   if we detected a GPU with CAL
-//      merge_opencl(): copy OpenCL info to COPROCS.ati_gpu
+// For each vendor (e.g. AMD)
+//   if we detected a GPU with a vendor library
+//      merge_opencl(): copy OpenCL info to COPROCS.amd
 //   else
 //      find_best_opencls(): find best OpenCL instance,
-//      populate COPROCS.ati_gpu
+//      populate COPROCS.amd
 //
 //
 // Finally (CLIENT_STATE::init()):
-// For each vendor (e.g. ATI)
-//  if COPROC_ATI is present (count>0)
+// For each vendor (e.g. AMD)
+//  if COPROC_AMD is present (count>0)
 //     append it to the COPROCS.coprocs vector
 // Append COPROCs for other OpenCL devices found
 
@@ -133,11 +133,11 @@ void segv_handler(int) {
 // - Intel GPUs can currently only be used via OpenCL.
 //  But this too could change.
 //
-vector<COPROC_ATI> ati_gpus;
+vector<COPROC_AMD> amd_gpus;
 vector<COPROC_NVIDIA> nvidia_gpus;
 vector<COPROC_INTEL> intel_gpus;
 vector<COPROC_APPLE> apple_gpus;
-vector<OPENCL_DEVICE_PROP> ati_opencls;
+vector<OPENCL_DEVICE_PROP> amd_opencls;
 vector<OPENCL_DEVICE_PROP> nvidia_opencls;
 vector<OPENCL_DEVICE_PROP> intel_gpu_opencls;
 vector<OPENCL_DEVICE_PROP> apple_gpu_opencls;
@@ -275,7 +275,7 @@ void COPROCS::set_vendor_devices() {
 }
 
 // populate the global vectors
-// ati_gpus, nvidia_gpus, intel_gpus, nvidia_opencls, etc.
+// amd_gpus, nvidia_gpus, intel_gpus, nvidia_opencls, etc.
 //
 void COPROCS::detect_gpus(vector<string> &warnings) {
     reset_dpm_clock_cache();
@@ -289,7 +289,7 @@ void COPROCS::detect_gpus(vector<string> &warnings) {
     }
 #endif
     try {
-        ati.get_hip(warnings);
+        amd.get_hip(warnings);
     }
     catch (...) {
         gpu_warning(warnings, "Caught SIGSEGV in HIP GPU detection");
@@ -311,11 +311,11 @@ void COPROCS::detect_gpus(vector<string> &warnings) {
     }
 
 
-#ifndef __APPLE__       // no CAL or HIP on Macs
+#ifndef __APPLE__       // no AMD vendor library on Macs
     if (setjmp(resume)) {
         gpu_warning(warnings, "Caught SIGSEGV in HIP GPU detection");
     } else {
-        ati.get_hip(warnings);
+        amd.get_hip(warnings);
     }
 #else
     apple_gpu.get(warnings);
@@ -328,12 +328,12 @@ void COPROCS::detect_gpus(vector<string> &warnings) {
     }
     signal(SIGSEGV, old_sig);
 #endif
-    ati.set_devices(ati_gpus, ati_opencls);
+    amd.set_devices(amd_gpus, amd_opencls);
     // correlate() copies the chosen instance; keep the per-device list on
     // every instance so it survives that assignment in the in-process path.
     //
-    for (unsigned int i=0; i<ati_gpus.size(); i++) {
-        ati_gpus[i].devices = ati.devices;
+    for (unsigned int i=0; i<amd_gpus.size(); i++) {
+        amd_gpus[i].devices = amd.devices;
     }
 
     // The child-process path writes this object before correlate() runs,
@@ -345,7 +345,7 @@ void COPROCS::detect_gpus(vector<string> &warnings) {
 // for each GPU type, scan the GPUs we detected
 // (e.g. the vector nvidia_gpus).
 // Find the most capable one, and the ones equivalent to it.
-// Also correlate OpenCL GPUs with CUDA/CAL GPUs.
+// Also correlate OpenCL GPUs with CUDA/HIP GPUs.
 // Then create a single COPROC (with appropriate count)
 // Also return a list of strings describing the GPUs.
 //
@@ -360,7 +360,7 @@ void COPROCS::correlate_gpus(
 #if !defined(_M_ARM) && !defined(_M_ARM64)
     nvidia.correlate(use_all, ignore_gpu_instance[PROC_TYPE_NVIDIA_GPU]);
 #endif
-    ati.correlate(use_all, ignore_gpu_instance[PROC_TYPE_AMD_GPU]);
+    amd.correlate(use_all, ignore_gpu_instance[PROC_TYPE_AMD_GPU]);
 #ifdef __APPLE__
     apple_gpu.correlate(use_all, ignore_gpu_instance[PROC_TYPE_APPLE_GPU]);
 #endif
@@ -411,33 +411,32 @@ void COPROCS::correlate_gpus(
         descs.push_back(string(buf2));
     }
 
-    for (i=0; i<ati_gpus.size(); i++) {
-        // This is really CAL description
-        ati_gpus[i].description(buf, sizeof(buf));
-        switch(ati_gpus[i].is_used) {
+    for (i=0; i<amd_gpus.size(); i++) {
+        amd_gpus[i].description(buf, sizeof(buf));
+        switch(amd_gpus[i].is_used) {
         case COPROC_IGNORED:
             snprintf(buf2, sizeof(buf2),
                 "%s: %s %d (ignored by config): %s",
-                ati_gpus[i].have_hip ? "HIP" : "CAL",
+                amd_gpus[i].have_hip ? "HIP" : "OpenCL",
                 proc_type_name(PROC_TYPE_AMD_GPU),
-                ati_gpus[i].device_num, buf
+                amd_gpus[i].device_num, buf
             );
             break;
         case COPROC_USED:
             snprintf(buf2, sizeof(buf2),
                 "%s: %s %d: %s",
-                ati_gpus[i].have_hip ? "HIP" : "CAL",
+                amd_gpus[i].have_hip ? "HIP" : "OpenCL",
                 proc_type_name(PROC_TYPE_AMD_GPU),
-                ati_gpus[i].device_num, buf
+                amd_gpus[i].device_num, buf
             );
             break;
         case COPROC_UNUSED:
         default:
             snprintf(buf2, sizeof(buf2),
                 "%s: %s %d: (not used) %s",
-                ati_gpus[i].have_hip ? "HIP" : "CAL",
+                amd_gpus[i].have_hip ? "HIP" : "OpenCL",
                 proc_type_name(PROC_TYPE_AMD_GPU),
-                ati_gpus[i].device_num, buf
+                amd_gpus[i].device_num, buf
             );
             break;
         }
@@ -458,10 +457,10 @@ void COPROCS::correlate_gpus(
         descs.push_back(string(buf));
     }
 
-    // Create descriptions for OpenCL ATI GPUs
+    // Create descriptions for OpenCL AMD GPUs
     //
-    for (i=0; i<ati_opencls.size(); i++) {
-        ati_opencls[i].description(buf, sizeof(buf), proc_type_name(PROC_TYPE_AMD_GPU));
+    for (i=0; i<amd_opencls.size(); i++) {
+        amd_opencls[i].description(buf, sizeof(buf), proc_type_name(PROC_TYPE_AMD_GPU));
         descs.push_back(string(buf));
     }
 
@@ -483,7 +482,7 @@ void COPROCS::correlate_gpus(
     //
     int max_other_coprocs = MAX_RSC-1;  // coprocs[0] is reserved for CPU
     if (have_nvidia()) max_other_coprocs--;
-    if (have_ati()) max_other_coprocs--;
+    if (have_amd()) max_other_coprocs--;
     if (have_intel_gpu()) max_other_coprocs--;
     if (have_apple_gpu()) max_other_coprocs--;
 
@@ -505,11 +504,11 @@ void COPROCS::correlate_gpus(
         descs.push_back(string(buf));
     }
 
-    ati_gpus.clear();
+    amd_gpus.clear();
     nvidia_gpus.clear();
     intel_gpus.clear();
     apple_gpus.clear();
-    ati_opencls.clear();
+    amd_opencls.clear();
     nvidia_opencls.clear();
     intel_gpu_opencls.clear();
     apple_gpu_opencls.clear();
@@ -583,20 +582,20 @@ int COPROCS::write_coproc_info_file(vector<string> &warnings) {
         mf.printf("    <cuda_version>%d</cuda_version>\n", nvidia.cuda_version);
     }
 
-    for (i=0; i<ati_gpus.size(); ++i) {
+    for (i=0; i<amd_gpus.size(); ++i) {
         // The per-device list belongs to the aggregate; attach it to each
         // instance entry so it survives the child-process file round trip
         // and whichever instance correlate() selects.
         //
-        ati_gpus[i].devices = ati.devices;
-        ati_gpus[i].write_xml(mf, false);
+        amd_gpus[i].devices = amd.devices;
+        amd_gpus[i].write_xml(mf, false);
     }
-    if (ati_gpus.empty() && !ati.devices.empty() && !ati_opencls.empty()) {
+    if (amd_gpus.empty() && !amd.devices.empty() && !amd_opencls.empty()) {
         // OpenCL-only host: there is no HIP instance to carry the list.
         // Write one aggregate entry so the parent can parse the devices.
         //
-        const OPENCL_DEVICE_PROP& o = ati_opencls[0];
-        COPROC_ATI cc;
+        const OPENCL_DEVICE_PROP& o = amd_opencls[0];
+        COPROC_AMD cc;
         cc.clear();
         safe_strcpy(cc.name, o.name);
         cc.count = 1;
@@ -606,14 +605,14 @@ int COPROCS::write_coproc_info_file(vector<string> &warnings) {
         cc.peak_flops = o.peak_flops;
         cc.peak_flops_dp = o.peak_flops_dp;
         cc.have_fp64 = o.have_fp64 || (o.double_fp_config != 0);
-        cc.attribs.localRAM = (int)(o.global_mem_size / MEGA);
+        cc.total_ram = o.global_mem_size;
         if (o.gfxip_major) {
             cc.gfx_target_version = o.gfxip_major*10000 + o.gfxip_minor*100;
             gfx_target_to_string(
                 cc.gfx_target_version, cc.gcn_arch, sizeof(cc.gcn_arch)
             );
         }
-        cc.devices = ati.devices;
+        cc.devices = amd.devices;
         cc.write_xml(mf, false);
     }
     // Per-device lists belong to the aggregate; attach them to each
@@ -636,8 +635,8 @@ int COPROCS::write_coproc_info_file(vector<string> &warnings) {
         apple_gpus[i].devices = apple_gpu.devices;
         apple_gpus[i].write_xml(mf, false);
     }
-    for (i=0; i<ati_opencls.size(); ++i) {
-        ati_opencls[i].write_xml(mf, "ati_opencl", true);
+    for (i=0; i<amd_opencls.size(); ++i) {
+        amd_opencls[i].write_xml(mf, "ati_opencl", true);
     }
     for (i=0; i<nvidia_opencls.size(); ++i) {
         nvidia_opencls[i].write_xml(mf, "nvidia_opencl", true);
@@ -672,7 +671,7 @@ int COPROCS::read_coproc_info_file(vector<string> &warnings) {
     FILE* f;
     string s;
 
-    COPROC_ATI my_ati_gpu;
+    COPROC_AMD my_amd_gpu;
     COPROC_NVIDIA my_nvidia_gpu;
     COPROC_INTEL my_intel_gpu;
     COPROC_APPLE my_apple_gpu;
@@ -683,11 +682,11 @@ int COPROCS::read_coproc_info_file(vector<string> &warnings) {
     OPENCL_DEVICE_PROP other_opencl;
     OPENCL_CPU_PROP cpu_opencl;
 
-    ati_gpus.clear();
+    amd_gpus.clear();
     nvidia_gpus.clear();
     intel_gpus.clear();
     apple_gpus.clear();
-    ati_opencls.clear();
+    amd_opencls.clear();
     nvidia_opencls.clear();
     intel_gpu_opencls.clear();
     apple_gpu_opencls.clear();
@@ -715,12 +714,12 @@ int COPROCS::read_coproc_info_file(vector<string> &warnings) {
         }
 
         if (xp.match_tag("coproc_ati")) {
-            retval = my_ati_gpu.parse(xp);
+            retval = my_amd_gpu.parse(xp);
             if (retval) {
-                my_ati_gpu.clear();
+                my_amd_gpu.clear();
             } else {
-                my_ati_gpu.device_num = (int)ati_gpus.size();
-                ati_gpus.push_back(my_ati_gpu);
+                my_amd_gpu.device_num = (int)amd_gpus.size();
+                amd_gpus.push_back(my_amd_gpu);
             }
             continue;
         }
@@ -764,7 +763,7 @@ int COPROCS::read_coproc_info_file(vector<string> &warnings) {
                 ati_opencl.clear();
             } else {
                 ati_opencl.is_used = COPROC_IGNORED;
-                ati_opencls.push_back(ati_opencl);
+                amd_opencls.push_back(ati_opencl);
             }
             continue;
         }

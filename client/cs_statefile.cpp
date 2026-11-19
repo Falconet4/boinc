@@ -990,7 +990,7 @@ int CLIENT_STATE::write_state_gui(MIOFILE& f) {
     if (coprocs.have_nvidia()) {
         f.printf("<have_cuda/>\n");
     }
-    if (coprocs.have_ati()) {
+    if (coprocs.have_amd()) {
         f.printf("<have_ati/>\n");
     }
 

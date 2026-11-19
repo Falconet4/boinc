@@ -373,7 +373,7 @@ bool CLIENT_STATE::simulate_rpc(PROJECT* p) {
             coprocs.nvidia.req_secs = rsc_work_fetch[i].req_secs;
         }
         if (!strcmp(cp.type, "ATI")) {
-            coprocs.ati.req_secs = rsc_work_fetch[i].req_secs;
+            coprocs.amd.req_secs = rsc_work_fetch[i].req_secs;
         }
         if (!strcmp(cp.type, "intel_gpu")) {
             coprocs.intel_gpu.req_secs = rsc_work_fetch[i].req_secs;
@@ -1343,13 +1343,13 @@ void cull_projects() {
 
     // remove results and active tasks of projects we're culling
     //
-    vector<ACTIVE_TASK*>::iterator ati = gstate.active_tasks.active_tasks.begin();
-    while (ati != gstate.active_tasks.active_tasks.end()) {
-        ACTIVE_TASK* atp = *ati;
+    vector<ACTIVE_TASK*>::iterator amd = gstate.active_tasks.active_tasks.begin();
+    while (amd != gstate.active_tasks.active_tasks.end()) {
+        ACTIVE_TASK* atp = *amd;
         if (atp->wup->project->ignore) {
-            ati = gstate.active_tasks.active_tasks.erase(ati);
+            amd = gstate.active_tasks.active_tasks.erase(amd);
         } else {
-            ++ati;
+            ++amd;
         }
     }
     vector<RESULT*>::iterator ri = gstate.results.begin();

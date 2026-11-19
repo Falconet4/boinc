@@ -475,7 +475,7 @@ void WORK_FETCH::copy_requests() {
             rsc_work_fetch[i].copy_request(coprocs.nvidia);
             break;
         case PROC_TYPE_AMD_GPU:
-            rsc_work_fetch[i].copy_request(coprocs.ati);
+            rsc_work_fetch[i].copy_request(coprocs.amd);
             break;
         case PROC_TYPE_INTEL_GPU:
             rsc_work_fetch[i].copy_request(coprocs.intel_gpu);

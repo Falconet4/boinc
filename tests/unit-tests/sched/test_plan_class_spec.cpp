@@ -19,11 +19,11 @@
 #include "plan_class_spec.h"
 #include <cstdio>
 
-static COPROC_ATI_DEVICE make_device(
+static COPROC_AMD_DEVICE make_device(
     const char* name, const char* arch, int device_num, bool fp64,
     double fp32, double fp64_peak, double ram
 ) {
-    COPROC_ATI_DEVICE d;
+    COPROC_AMD_DEVICE d;
     snprintf(d.name, sizeof(d.name), "%s", name);
     snprintf(d.gcn_arch, sizeof(d.gcn_arch), "%s", arch);
     d.device_num = device_num;
@@ -38,10 +38,10 @@ static COPROC_ATI_DEVICE make_device(
 
 TEST(test_plan_class_spec, amd_require_fp64) {
     AMD_DEVICE_REQUIREMENTS spec;
-    COPROC_ATI_DEVICE fp64 = make_device(
+    COPROC_AMD_DEVICE fp64 = make_device(
         "MI50", "gfx906", 0, true, 26.5e12, 13.25e12, 32.*1024.*1024.*1024.
     );
-    COPROC_ATI_DEVICE consumer = make_device(
+    COPROC_AMD_DEVICE consumer = make_device(
         "RX 9060 XT", "gfx1200", 1, false, 22.7e12, 0, 16.*1024.*1024.*1024.
     );
     spec.require_fp64 = true;
@@ -57,10 +57,10 @@ TEST(test_plan_class_spec, amd_arch_and_hip) {
     PLAN_CLASS_REGEX arch_regex;
     ASSERT_EQ(arch_regex.compile("^gfx9", REG_EXTENDED), 0);
     spec.gcn_arch_regex = &arch_regex;
-    COPROC_ATI_DEVICE mi = make_device(
+    COPROC_AMD_DEVICE mi = make_device(
         "MI50", "gfx906", 0, true, 26.5e12, 13.25e12, 32.*1024.*1024.*1024.
     );
-    COPROC_ATI_DEVICE rdna = make_device(
+    COPROC_AMD_DEVICE rdna = make_device(
         "RX 9060 XT", "gfx1200", 1, false, 22.7e12, 0, 16.*1024.*1024.*1024.
     );
     double ram = 0;
@@ -69,7 +69,7 @@ TEST(test_plan_class_spec, amd_arch_and_hip) {
 
     AMD_DEVICE_REQUIREMENTS spec2;
     spec2.require_hip = true;
-    COPROC_ATI_DEVICE no_hip = mi;
+    COPROC_AMD_DEVICE no_hip = mi;
     no_hip.have_hip = false;
     EXPECT_FALSE(amd_device_matches(spec2, no_hip, ram, NULL));
     spec2.min_hip_version = 60300000;
@@ -213,7 +213,7 @@ TEST(test_plan_class_spec, amd_matching_set) {
     AMD_DEVICE_REQUIREMENTS req;
     req.require_fp64 = true;
 
-    COPROC_ATI cp;
+    COPROC_AMD cp;
     cp.clear();
     cp.devices.push_back(make_device(
         "MI50", "gfx906", 0, true, 26.5e12, 13.25e12, 32.*1024.*1024.*1024.
@@ -243,10 +243,10 @@ TEST(test_plan_class_spec, amd_matching_set) {
 TEST(test_plan_class_spec, amd_ram_and_peak) {
     AMD_DEVICE_REQUIREMENTS spec;
     spec.min_gpu_ram_mb = 20. * 1024.;
-    COPROC_ATI_DEVICE mi = make_device(
+    COPROC_AMD_DEVICE mi = make_device(
         "MI50", "gfx906", 0, true, 26.5e12, 13.25e12, 32.*1024.*1024.*1024.
     );
-    COPROC_ATI_DEVICE small = make_device(
+    COPROC_AMD_DEVICE small = make_device(
         "RX 9060 XT", "gfx1200", 1, false, 22.7e12, 0, 16.*1024.*1024.*1024.
     );
     double ram = 0;

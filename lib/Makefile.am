@@ -154,7 +154,6 @@ pkginclude_HEADERS = \
     average.h \
     base64.h \
     boinc_stdio.h \
-    cal_boinc.h \
     cc_config.h \
     cert_sig.h \
     cl_boinc.h \

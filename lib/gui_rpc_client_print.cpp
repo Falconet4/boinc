@@ -271,7 +271,7 @@ void HOST_INFO::print() {
             printf("    %s\n", buf);
         }
     }
-    COPROC_ATI &ca = coprocs.ati;
+    COPROC_AMD &ca = coprocs.amd;
     if (ca.count) {
         ca.description(buf, sizeof(buf));
         printf("  AMD GPU: %s\n", buf);

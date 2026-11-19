@@ -26,7 +26,7 @@
 // GCN has one FMA per lane per clock: 2 FLOPs.
 //
 TEST(test_coproc, peak_flops_gcn) {
-    COPROC_ATI c;
+    COPROC_AMD c;
     c.clear();
     c.have_hip = true;
     c.hip_cu_count = 64;
@@ -39,7 +39,7 @@ TEST(test_coproc, peak_flops_gcn) {
 // RDNA 1/2 has no dual issue.
 //
 TEST(test_coproc, peak_flops_rdna2) {
-    COPROC_ATI c;
+    COPROC_AMD c;
     c.clear();
     c.have_hip = true;
     c.hip_lane_count = 2560;            // 40 CUs
@@ -53,7 +53,7 @@ TEST(test_coproc, peak_flops_rdna2) {
 // RX 9060 XT: 32 CU, 2780 MHz -> 22.77 TFLOPS.
 //
 TEST(test_coproc, peak_flops_rdna4) {
-    COPROC_ATI c;
+    COPROC_AMD c;
     c.clear();
     c.have_hip = true;
     c.hip_lane_count = 2048;            // 32 CUs
@@ -68,7 +68,7 @@ TEST(test_coproc, peak_flops_rdna4) {
 // with a pre-RDNA3 part.
 //
 TEST(test_coproc, peak_flops_opencl_dual_issue) {
-    COPROC_ATI c;
+    COPROC_AMD c;
     c.clear();
     c.opencl_prop.max_compute_units = 16;
     c.opencl_prop.amd_simd_per_compute_unit = 4;
@@ -90,7 +90,7 @@ TEST(test_coproc, peak_flops_opencl_dual_issue) {
 // 1/16, and an unknown architecture reports no estimate.
 //
 TEST(test_coproc, fp64_rdna4) {
-    COPROC_ATI c;
+    COPROC_AMD c;
     c.clear();
     c.have_hip = true;
     c.hip_lane_count = 2048;
@@ -102,7 +102,7 @@ TEST(test_coproc, fp64_rdna4) {
 }
 
 TEST(test_coproc, fp64_rdna2) {
-    COPROC_ATI c;
+    COPROC_AMD c;
     c.clear();
     c.have_hip = true;
     c.hip_lane_count = 2048;
@@ -231,7 +231,7 @@ TEST(test_coproc, device_num_allowed) {
 }
 
 TEST(test_coproc, per_device_list_from_hip) {
-    std::vector<COPROC_ATI> hip(2);
+    std::vector<COPROC_AMD> hip(2);
     hip[0].clear();
     strcpy(hip[0].name, "AMD Radeon RX 9060 XT");
     strcpy(hip[0].gcn_arch, "gfx1200");
@@ -241,7 +241,7 @@ TEST(test_coproc, per_device_list_from_hip) {
     hip[0].have_fp64 = true;
     hip[0].peak_flops = 22.7e12;
     hip[0].peak_flops_dp = 22.7e12/32.;
-    hip[0].attribs.localRAM = 16384;
+    hip[0].total_ram = 16384.*1024.*1024.;
 
     hip[1].clear();
     strcpy(hip[1].name, "AMD Instinct MI50");
@@ -252,9 +252,9 @@ TEST(test_coproc, per_device_list_from_hip) {
     hip[1].have_fp64 = true;
     hip[1].peak_flops = 26.5e12;
     hip[1].peak_flops_dp = 13.25e12;
-    hip[1].attribs.localRAM = 32768;
+    hip[1].total_ram = 32768.*1024.*1024.;
 
-    COPROC_ATI agg;
+    COPROC_AMD agg;
     agg.clear();
     std::vector<OPENCL_DEVICE_PROP> none;
     agg.set_devices(hip, none);
@@ -271,10 +271,10 @@ TEST(test_coproc, per_device_list_from_hip) {
 }
 
 TEST(test_coproc, per_device_xml_roundtrip) {
-    COPROC_ATI a;
+    COPROC_AMD a;
     a.clear();
     a.devices.clear();
-    COPROC_ATI_DEVICE d;
+    COPROC_AMD_DEVICE d;
     strcpy(d.name, "AMD Radeon RX 9060 XT");
     strcpy(d.gcn_arch, "gfx1200");
     d.gfx_target_version = 120000;
@@ -302,7 +302,7 @@ TEST(test_coproc, per_device_xml_roundtrip) {
     r.init_buf_read(buf);
     XML_PARSER xp(&r);
     ASSERT_TRUE(xp.parse_start("coproc_ati"));
-    COPROC_ATI b;
+    COPROC_AMD b;
     ASSERT_EQ(b.parse(xp), 0);
     ASSERT_EQ(b.devices.size(), 2u);
     EXPECT_STREQ(b.devices[0].name, "AMD Radeon RX 9060 XT");
@@ -316,7 +316,7 @@ TEST(test_coproc, per_device_xml_roundtrip) {
 }
 
 TEST(test_coproc, per_device_list_opencl_only) {
-    std::vector<COPROC_ATI> none;
+    std::vector<COPROC_AMD> none;
     std::vector<OPENCL_DEVICE_PROP> ocl(1);
     ocl[0].clear();
     strcpy(ocl[0].name, "AMD Radeon Graphics");
@@ -328,7 +328,7 @@ TEST(test_coproc, per_device_list_opencl_only) {
     ocl[0].peak_flops_dp = 0.5e12;
     ocl[0].have_fp64 = true;
 
-    COPROC_ATI agg;
+    COPROC_AMD agg;
     agg.clear();
     agg.set_devices(none, ocl);
     ASSERT_EQ(agg.devices.size(), 1u);
@@ -342,7 +342,7 @@ TEST(test_coproc, per_device_list_opencl_only) {
 // marketing name is missing, the PCI device ID decides.
 //
 TEST(test_coproc, fp64_gfx906_device_id) {
-    COPROC_ATI c;
+    COPROC_AMD c;
     c.clear();
     c.have_hip = true;
     c.hip_lane_count = 2048;
@@ -369,7 +369,7 @@ TEST(test_coproc, fp64_gfx906_device_id) {
 }
 
 TEST(test_coproc, fp64_unknown_arch) {
-    COPROC_ATI c;
+    COPROC_AMD c;
     c.clear();
     c.have_hip = true;
     c.hip_lane_count = 2048;
@@ -427,7 +427,7 @@ TEST(test_coproc, fp64_cc62) {
 // a CDNA part.  A range test on the gfx target used to give it 1:1.
 //
 TEST(test_coproc, fp64_gfx90c_is_vega) {
-    COPROC_ATI c;
+    COPROC_AMD c;
     c.clear();
     c.have_hip = true;
     c.hip_cu_count = 8;
@@ -442,7 +442,7 @@ TEST(test_coproc, fp64_gfx90c_is_vega) {
 // MI100 (gfx908, target 90008) is CDNA 1 at 1:2.
 //
 TEST(test_coproc, fp64_mi100_one_to_two) {
-    COPROC_ATI c;
+    COPROC_AMD c;
     c.clear();
     c.have_hip = true;
     c.hip_cu_count = 120;
@@ -457,7 +457,7 @@ TEST(test_coproc, fp64_mi100_one_to_two) {
 // MI300X (gfx942, target 90402) is CDNA 3 at 1:2.
 //
 TEST(test_coproc, fp64_mi300_one_to_two) {
-    COPROC_ATI c;
+    COPROC_AMD c;
     c.clear();
     c.have_hip = true;
     c.hip_cu_count = 304;
@@ -534,7 +534,7 @@ TEST(test_coproc, gfx_target_to_string_zero_len) {
 // CDNA 2 (MI200) has a 1:1 FP64 rate.
 //
 TEST(test_coproc, fp64_mi200_one_to_one) {
-    COPROC_ATI c;
+    COPROC_AMD c;
     c.clear();
     c.have_hip = true;
     c.hip_cu_count = 110;

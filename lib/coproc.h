@@ -80,7 +80,6 @@
 #include "boinc_stdio.h"
 #include "miofile.h"
 #include "error_numbers.h"
-#include "cal_boinc.h"
 #include "cl_boinc.h"
 #include "opencl_boinc.h"
 #include "common_defs.h"
@@ -152,7 +151,7 @@ struct PCI_INFO {
 
 // represents a set of identical coprocessors on a particular computer.
 // Abstract class;
-// objects will always be a derived class (COPROC_CUDA, COPROC_ATI)
+// objects will always be a derived class (COPROC_CUDA, COPROC_AMD)
 // Used in both client and server.
 //
 // One physical GPU as reported by a vendor API or OpenCL.  Used for the
@@ -205,7 +204,6 @@ struct COPROC {
     bool have_fp64;         // device supports double precision
     double used;        // how many are in use (used by client)
     bool have_cuda;     // this GPU supports CUDA
-    bool have_cal;      // this GPU supports CAL
     bool have_opencl;   // this GPU supports openCL
     bool have_metal;
     double available_ram;
@@ -251,7 +249,7 @@ struct COPROC {
     OPENCL_DEVICE_PROP opencl_prop;
     std::vector<GPU_DEVICE> devices;
         // Every physical device of this resource.  AMD keeps a richer
-        // list in COPROC_ATI::devices; this one also carries devices
+        // list in COPROC_AMD::devices; this one also carries devices
         // declared in cc_config.xml.
 
     COPROC(DUMMY_TYPE){}
@@ -370,16 +368,21 @@ struct COPROC_NVIDIA : public COPROC {
 
 };
 
-// encode a 3-part version as // 10000000*major + 10000*minor + release
-// Note: ATI release #s can exceed 1000
-//
-inline int ati_version_int(int major, int minor, int release) {
-    return major*10000000 + minor*10000 + release;
-}
 
 // Format the encoded HIP runtime version for human-readable output.
 //
 extern void format_hip_version(int v, char* buf, int buflen);
+
+// FP32 lanes per HIP compute unit.  HIP reports one "compute unit" per
+// workgroup processor on RDNA (wave32), i.e. 128 lanes, and one per CU on
+// GCN (wave64), i.e. 64 lanes; CDNA 3/4 (gfx904+) have 128.
+//
+inline int hip_lanes_per_cu(int warp_size, int gfxip_major, int gfx_target) {
+    if (warp_size == 32) return 128;
+    if (!warp_size && gfxip_major >= 10) return 128;
+    if (gfxip_major == 9 && gfx_target >= 90400) return 128;
+    return 64;
+}
 
 // Parse a space-separated list of GPU device numbers.  Out-of-range and
 // malformed entries are ignored.
@@ -410,7 +413,7 @@ inline bool device_num_allowed(const int* nums, int n, int dev) {
     return false;
 }
 
-struct COPROC_ATI_DEVICE {
+struct COPROC_AMD_DEVICE {
     char name[256];
     char gcn_arch[64];
     int gfx_target_version;
@@ -434,18 +437,16 @@ struct COPROC_ATI_DEVICE {
         peak_flops_dp = 0;
         total_ram = 0;
     }
-    COPROC_ATI_DEVICE() { clear(); }
+    COPROC_AMD_DEVICE() { clear(); }
 };
 
-struct COPROC_ATI : public COPROC {
+struct COPROC_AMD : public COPROC {
     char name[256];
-    char version[50];
-    int version_num;
-        // CAL version (not driver version) encoded as an int
-    bool atirt_detected;
-    bool amdrt_detected;
-    CALdeviceattribs attribs;
-    CALdeviceinfo info;
+    double total_ram;           // bytes; total VRAM, not free
+    int simd_count;             // # of compute units, if known
+    int wavefront_size;         // 32 (RDNA) or 64 (GCN)
+    int engine_clock_mhz;
+    int double_precision;       // device reports FP64 support
 
     // ROCm/HIP
     //
@@ -469,17 +470,17 @@ struct COPROC_ATI : public COPROC {
     // aggregate fields above remain for scheduler compatibility; this
     // list is for reporting and future per-device scheduling.
     //
-    std::vector<COPROC_ATI_DEVICE> devices;
+    std::vector<COPROC_AMD_DEVICE> devices;
 
 #ifndef _USING_FCGI_
     void write_xml(MIOFILE&, bool scheduler_rpc);
 #endif
-    COPROC_ATI(int): COPROC() {}
-    COPROC_ATI(): COPROC() {clear();}
+    COPROC_AMD(int): COPROC() {}
+    COPROC_AMD(): COPROC() {clear();}
     void get(std::vector<std::string>& warnings);
     void get_hip(std::vector<std::string>& warnings);
     void set_devices(
-        const std::vector<COPROC_ATI>& hip,
+        const std::vector<COPROC_AMD>& hip,
         const std::vector<OPENCL_DEVICE_PROP>& ocl
     );
     void correlate(
@@ -538,7 +539,7 @@ struct COPROCS {
     // (These GPUs are also represented by elements in the coprocs array)
     //
     COPROC_NVIDIA nvidia;
-    COPROC_ATI ati;
+    COPROC_AMD amd;
     COPROC_INTEL intel_gpu;
     COPROC_APPLE apple_gpu;
 
@@ -597,7 +598,7 @@ struct COPROCS {
             coprocs[i].clear();
         }
         nvidia.clear();
-        ati.clear();
+        amd.clear();
         intel_gpu.clear();
         COPROC c;
         strcpy(c.type, "CPU");
@@ -622,8 +623,8 @@ struct COPROCS {
     inline bool have_nvidia() {
         return (nvidia.count > 0);
     }
-    inline bool have_ati() {
-        return (ati.count > 0);
+    inline bool have_amd() {
+        return (amd.count > 0);
     }
     inline bool have_intel_gpu() {
         return (intel_gpu.count > 0);
@@ -657,7 +658,7 @@ struct COPROCS {
     COPROC* proc_type_to_coproc(int t) {
         switch(t) {
         case PROC_TYPE_NVIDIA_GPU: return &nvidia;
-        case PROC_TYPE_AMD_GPU: return &ati;
+        case PROC_TYPE_AMD_GPU: return &amd;
         case PROC_TYPE_INTEL_GPU: return &intel_gpu;
         case PROC_TYPE_APPLE_GPU: return &apple_gpu;
         }
@@ -666,7 +667,7 @@ struct COPROCS {
     COPROCS() {
         n_rsc = 0;
         nvidia.count = 0;
-        ati.count = 0;
+        amd.count = 0;
         intel_gpu.count = 0;
         COPROC c;
         strcpy(c.type, "CPU");

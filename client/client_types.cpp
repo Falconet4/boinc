@@ -787,7 +787,7 @@ void RESOURCE_USAGE::clear() {
     missing_coproc_name[0] = 0;
 }
 
-// see if we have the GPU libraries (OpenCL/CUDA/CAL)
+// see if we have the GPU libraries (OpenCL/CUDA/HIP)
 // required by the plan class.
 // If not, set missing_coproc
 //
@@ -811,12 +811,18 @@ void RESOURCE_USAGE::check_gpu_libs(char* plan_class) {
             safe_strcpy(missing_coproc_name, coprocs.coprocs[rt].type);
         }
     } else if (strstr(plan_class, "ati")) {
-        if (!coprocs.coprocs[rt].have_cal) {
+        // "ati" is the historical AMD plan-class name.  AMD apps run
+        // through HIP or OpenCL now that CAL is gone; the aggregate
+        // have_opencl/have_hip flags are set by whichever path detected
+        // the GPU, so require one of them.
+        //
+        COPROC& c = coprocs.coprocs[rt];
+        if (!c.have_opencl && !coprocs.amd.have_hip) {
             msg_printf(0, MSG_INFO,
-                "App version needs CAL but GPU doesn't support it"
+                "App version is for an AMD GPU but none has HIP or OpenCL"
             );
             missing_coproc = true;
-            safe_strcpy(missing_coproc_name, coprocs.coprocs[rt].type);
+            safe_strcpy(missing_coproc_name, c.type);
         }
     }
 }

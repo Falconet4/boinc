@@ -1304,10 +1304,14 @@ void send_gpu_messages() {
             proc_type_name(PROC_TYPE_NVIDIA_GPU)
         );
     }
-    if (g_request->coprocs.ati.count && ssp->have_apps_for_proc_type[PROC_TYPE_AMD_GPU]) {
+    if (g_request->coprocs.amd.count && ssp->have_apps_for_proc_type[PROC_TYPE_AMD_GPU]) {
+        // No AMD driver version: only CAL reported one, and the CAL
+        // encoding is not comparable with a HIP version.  AMD plan classes
+        // gate on gcn_arch_regex / min_hip_version instead.
+        //
         send_gpu_property_messages(gpu_requirements[PROC_TYPE_AMD_GPU],
-            g_request->coprocs.ati.attribs.localRAM*MEGA,
-            g_request->coprocs.ati.version_num,
+            g_request->coprocs.amd.total_ram,
+            0,
             proc_type_name(PROC_TYPE_AMD_GPU)
         );
     }
