@@ -25,6 +25,12 @@ if (DISABLE_PROFILES) error_page("Profiles are disabled");
 $user = get_logged_in_user();
 
 $cmd = get_str("cmd", true);
+// Deleting the profile is reached by a plain GET link, so require a token
+// before acting on it.
+//
+if ($cmd == "delete") {
+    check_tokens();
+}
 
 if ($cmd == "delete") {
     $result = delete_profile($user);
@@ -51,7 +57,10 @@ if you want another profile in the future.")."
 to remove your profile from our database.")."
     <p>
 ";
-    show_button("delete_profile.php?cmd=delete", tra("Yes"), tra("Delete my profile"));
+    show_button(
+        "delete_profile.php?cmd=delete".url_tokens(),
+        tra("Yes"), tra("Delete my profile")
+    );
     show_button("index.php", tra("No"), tra("Do not delete my profile"));
 page_tail();
 

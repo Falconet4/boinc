@@ -471,6 +471,8 @@ function user_erase_team_delta($user) {
 function team_edit_form($team, $label, $url) {
     global $team_types;
     echo "<form method=post action=$url>\n";
+    echo form_tokens();
+
     if ($team) {
         echo "<input type=hidden name=teamid value=$team->id>\n";
         if ($team->seti_id) {

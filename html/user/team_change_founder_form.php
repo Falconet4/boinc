@@ -54,6 +54,7 @@ if ($team->ping_user != 0) {
             <form method=\"post\" action=\"team_founder_transfer_action.php\">
             <input type=\"hidden\" name=\"action\" value=\"decline\">
             <input type=\"hidden\" name=\"teamid\" value=\"".$team->id."\">
+            ".form_tokens()."
         ";
         show_submit_button(tra("decline request"));
         echo "

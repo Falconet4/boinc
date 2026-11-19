@@ -34,6 +34,7 @@ if (DISABLE_TEAMS) error_page("Teams are disabled");
 check_get_args(array());
 
 $user = get_logged_in_user();
+check_tokens();
 if (!$user->teamid) {
     error_page(tra("You must be a member of a team to access this page."));
 }

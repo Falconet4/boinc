@@ -25,6 +25,7 @@ if (DISABLE_TEAMS) error_page("Teams are disabled");
 check_get_args(array());
 
 $user = get_logged_in_user();
+check_tokens();
 $teamid = post_int("id");
 $team = BoincTeam::lookup_id($teamid);
 if (!$team) error_page(tra("No such team"));

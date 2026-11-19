@@ -35,6 +35,7 @@ page_head(tra("Remove members from %1", $team->name));
 echo "
     <form method=\"post\" action=\"team_remove_inactive_action.php\">
     <input type=\"hidden\" name=\"id\" value=\"".$team->id."\">
+    ".form_tokens()."
 ";
 start_table();
 row_heading_array(

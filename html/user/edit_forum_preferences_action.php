@@ -21,6 +21,7 @@ require_once("../inc/forum.inc");
 require_once("../inc/image.inc"); // Avatar scaling
 
 $user = get_logged_in_user();
+check_tokens();
 BoincForumPrefs::lookup($user);
 
 if (post_str("action", true)=="reset_confirm"){
@@ -29,6 +30,7 @@ if (post_str("action", true)=="reset_confirm"){
         <p>
         <form action=edit_forum_preferences_action.php method=post>
         <input type=hidden name=action value=reset>
+        ".form_tokens()."
         <input class=\"btn btn-warning\" type=submit value=\"".tra("Reset preferences")."\">
         </form>
     ";

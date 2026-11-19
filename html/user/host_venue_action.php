@@ -20,9 +20,10 @@ require_once("../inc/boinc_db.inc");
 require_once("../inc/util.inc");
 require_once("../inc/prefs.inc");
 
-check_get_args(array("hostid", "venue"));
+check_get_args(array("hostid", "venue", "tnow", "ttok"));
 
 $user = get_logged_in_user();
+check_tokens();
 
 $venue = get_str("venue");
 check_venue($venue);
