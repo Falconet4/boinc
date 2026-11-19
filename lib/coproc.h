@@ -359,6 +359,7 @@ struct COPROC_NVIDIA : public COPROC {
         std::vector<int>& ignore_devs
     );
     void description(char* buf, int buflen);
+    void build_devices(std::vector<int>& ignore_devs);
     void clear();
     int parse(XML_PARSER&);
     void set_peak_flops();

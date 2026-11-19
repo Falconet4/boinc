@@ -299,11 +299,10 @@ static bool amd_select_devices(
 // describing the fastest match.  Returns false if none matches.  Leaves the
 // aggregate untouched when the client reports no per-device list.
 //
-template <typename T>
 static bool gpu_select_devices(
     const GPU_DEVICE_REQUIREMENTS& req,
     const std::vector<GPU_DEVICE>& devices, const COPROC& cp,
-    HOST_USAGE& hu, T& cp_dev, GPU_DEVICE& best,
+    HOST_USAGE& hu, COPROC& cp_dev, GPU_DEVICE& best,
     double& gpu_ram_min, bool& per_device
 ) {
     per_device = !devices.empty();
