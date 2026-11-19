@@ -730,3 +730,57 @@ TEST(test_coproc, cc_config_device_name_xml_escaped) {
         EXPECT_STREQ(b.devices[0].name, name) << "for [" << name << "]";
     }
 }
+
+// The scheduler derives the host's total GPU FLOPS from what the client
+// sends.  count*peak_flops assumes every device matches the fastest one,
+// so a host with different GPUs is over-reported.  Sum the per-device
+// peaks when they are present, and fall back to the aggregate when they
+// are not (a client that sends none means count identical devices).
+//
+TEST(test_coproc, sum_device_peak_flops_sums_devices) {
+    COPROC cp;
+    cp.clear();
+    cp.count = 2;
+    cp.peak_flops = 20e12;      // the fastest device
+    GPU_DEVICE a, b;
+    a.peak_flops = 20e12;
+    b.peak_flops = 5e12;
+    cp.devices.push_back(a);
+    cp.devices.push_back(b);
+    EXPECT_DOUBLE_EQ(cp.sum_device_peak_flops(), 25e12);
+    // the aggregate formula would have said 40e12
+    EXPECT_DOUBLE_EQ(cp.count * cp.peak_flops, 40e12);
+}
+
+TEST(test_coproc, sum_device_peak_flops_falls_back_to_aggregate) {
+    COPROC cp;
+    cp.clear();
+    cp.count = 3;
+    cp.peak_flops = 10e12;
+    EXPECT_TRUE(cp.devices.empty());
+    EXPECT_DOUBLE_EQ(cp.sum_device_peak_flops(), 30e12);
+}
+
+// AMD parses into its own richer device list, which shadows the base
+// COPROC::devices that generic scheduler code walks.  Parsing must fill
+// both, or every AMD host reports zero device FLOPS.
+//
+TEST(test_coproc, amd_parse_fills_base_devices) {
+    const char* req =
+        "<coproc_ati>\n"
+        "  <count>2</count>\n"
+        "  <peak_flops>20e12</peak_flops>\n"
+        "  <device><device_num>0</device_num><peak_flops>20e12</peak_flops></device>\n"
+        "  <device><device_num>1</device_num><peak_flops>5e12</peak_flops></device>\n"
+        "</coproc_ati>\n";
+    MIOFILE r;
+    r.init_buf_read(req);
+    XML_PARSER xp(&r);
+    ASSERT_TRUE(xp.parse_start("coproc_ati"));
+    COPROC_AMD amd;
+    ASSERT_EQ(amd.parse(xp), 0);
+    EXPECT_EQ(amd.devices.size(), 2u);
+    COPROC& base = amd;
+    ASSERT_EQ(base.devices.size(), 2u);
+    EXPECT_DOUBLE_EQ(base.sum_device_peak_flops(), 25e12);
+}

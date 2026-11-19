@@ -304,6 +304,26 @@ struct COPROC {
         }
         return false;
     }
+
+    // Total FP32 peak of the devices this resource describes.
+    //
+    // count*peak_flops assumes every device has the peak of the fastest
+    // one, which over-reports a host whose GPUs differ.  Sum the reported
+    // per-device peaks when the client sent them; fall back to the
+    // aggregate for clients that did not.
+    //
+    // Not to be confused with the client's free function
+    // total_peak_flops() in work_fetch.h, which estimates this host's
+    // aggregate throughput from resource speeds.
+    //
+    inline double sum_device_peak_flops() const {
+        double x = 0;
+        for (unsigned int i=0; i<devices.size(); i++) {
+            x += devices[i].peak_flops;
+        }
+        if (!x) x = count * peak_flops;
+        return x;
+    }
 };
 
 // Based on cudaDeviceProp from /usr/local/cuda/include/driver_types.h

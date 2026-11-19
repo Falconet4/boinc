@@ -1338,6 +1338,20 @@ int COPROC_AMD::parse(XML_PARSER& xp) {
             if (devices.size() < MAX_COPROC_INSTANCES) {
                 devices.push_back(d);
             }
+            // Also fill the base COPROC list.  This class declares its own
+            // richer 'devices', which shadows COPROC::devices; generic
+            // scheduler code walks the base list, so keep it populated.
+            //
+            if (COPROC::devices.size() < MAX_COPROC_INSTANCES) {
+                GPU_DEVICE g;
+                safe_strcpy(g.name, d.name);
+                g.device_num = d.device_num;
+                g.have_fp64 = d.have_fp64;
+                g.peak_flops = d.peak_flops;
+                g.peak_flops_dp = d.peak_flops_dp;
+                g.total_ram = d.total_ram;
+                COPROC::devices.push_back(g);
+            }
             continue;
         }
         if (xp.match_tag("/coproc_ati")) {
