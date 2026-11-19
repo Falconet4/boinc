@@ -122,6 +122,33 @@ TEST(test_coproc, fp64_unknown_arch) {
     EXPECT_DOUBLE_EQ(c.peak_flops_dp, 0.);
 }
 
+// Tesla P100 (compute capability 6.0) has a 1:2 FP64 rate.
+//
+TEST(test_coproc, fp64_p100_cc60) {
+    COPROC_NVIDIA c;
+    c.clear();
+    c.cuda_prop.major = 6;
+    c.cuda_prop.minor = 0;
+    c.cuda_prop.clockRate = 1000000;
+    c.cuda_prop.multiProcessorCount = 56;
+    c.set_peak_flops();
+    EXPECT_TRUE(c.have_fp64);
+    EXPECT_DOUBLE_EQ(c.peak_flops_dp, c.peak_flops / 2.);
+}
+
+// Geforce GTX 1080 (compute capability 6.1) also has 1:2 FP64.
+//
+TEST(test_coproc, fp64_cc61) {
+    COPROC_NVIDIA c;
+    c.clear();
+    c.cuda_prop.major = 6;
+    c.cuda_prop.minor = 1;
+    c.cuda_prop.clockRate = 1000000;
+    c.cuda_prop.multiProcessorCount = 20;
+    c.set_peak_flops();
+    EXPECT_DOUBLE_EQ(c.peak_flops_dp, c.peak_flops / 2.);
+}
+
 // CDNA 2 (MI200) has a 1:1 FP64 rate.
 //
 TEST(test_coproc, fp64_mi200_one_to_one) {

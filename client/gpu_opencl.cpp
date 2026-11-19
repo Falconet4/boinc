@@ -591,6 +591,8 @@ void COPROCS::get_opencl(
 
                 if (cuda_match_found) {
                     opencl_prop.peak_flops = nvidia_gpus[opencl_prop.device_num].peak_flops;
+                    opencl_prop.peak_flops_dp = nvidia_gpus[opencl_prop.device_num].peak_flops_dp;
+                    opencl_prop.have_fp64 = nvidia_gpus[opencl_prop.device_num].have_fp64;
                 } else {
                     COPROC_NVIDIA c;
                     c.opencl_prop = opencl_prop;
@@ -599,6 +601,8 @@ void COPROCS::get_opencl(
                         gpu_warning(warnings, s.c_str());
                     }
                     opencl_prop.peak_flops = c.peak_flops;
+                    opencl_prop.peak_flops_dp = c.peak_flops_dp;
+                    opencl_prop.have_fp64 = c.have_fp64;
                 }
                 if (cuda_match_found) {
                     // Assumes OpenCL device_num and CUDA device_num now match
@@ -678,6 +682,8 @@ void COPROCS::get_opencl(
                         gpu_warning(warnings, s.c_str());
                     }
                     opencl_prop.peak_flops = c.peak_flops;
+                    opencl_prop.peak_flops_dp = c.peak_flops_dp;
+                    opencl_prop.have_fp64 = c.have_fp64;
                 }
 
                 if (ati_gpus.size()) {
@@ -701,6 +707,8 @@ void COPROCS::get_opencl(
                     gpu_warning(warnings, s.c_str());
                 }
                 opencl_prop.peak_flops = c.peak_flops;
+                opencl_prop.peak_flops_dp = c.peak_flops_dp;
+                opencl_prop.have_fp64 = c.have_fp64;
                 opencl_prop.opencl_available_ram = opencl_prop.global_mem_size;
 
                 intel_gpu_opencls.push_back(opencl_prop);

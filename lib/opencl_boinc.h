@@ -81,6 +81,8 @@ struct OPENCL_DEVICE_PROP {
     char opencl_driver_version[512];    // For example: "CLH 1.0"
     int device_num;                     // temp used in scan process
     double peak_flops;                  // temp used in scan process
+    double peak_flops_dp;               // estimated FP64 peak
+    bool have_fp64;
     COPROC_USAGE is_used;               // temp used in scan process
     double opencl_available_ram;        // temp used in scan process
     int opencl_device_index;            // zero-based device number within this OpenCL platform

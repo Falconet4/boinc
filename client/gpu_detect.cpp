@@ -330,23 +330,26 @@ void COPROCS::correlate_gpus(
         switch(ati_gpus[i].is_used) {
         case COPROC_IGNORED:
             snprintf(buf2, sizeof(buf2),
-                "%s: ATI GPU %d (ignored by config): %s",
+                "%s: %s %d (ignored by config): %s",
                 ati_gpus[i].have_hip ? "HIP" : "CAL",
+                proc_type_name(PROC_TYPE_AMD_GPU),
                 ati_gpus[i].device_num, buf
             );
             break;
         case COPROC_USED:
             snprintf(buf2, sizeof(buf2),
-                "%s: ATI GPU %d: %s",
+                "%s: %s %d: %s",
                 ati_gpus[i].have_hip ? "HIP" : "CAL",
+                proc_type_name(PROC_TYPE_AMD_GPU),
                 ati_gpus[i].device_num, buf
             );
             break;
         case COPROC_UNUSED:
         default:
             snprintf(buf2, sizeof(buf2),
-                "%s: ATI GPU %d: (not used) %s",
+                "%s: %s %d: (not used) %s",
                 ati_gpus[i].have_hip ? "HIP" : "CAL",
+                proc_type_name(PROC_TYPE_AMD_GPU),
                 ati_gpus[i].device_num, buf
             );
             break;

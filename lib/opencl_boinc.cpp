@@ -92,11 +92,15 @@ void OPENCL_DEVICE_PROP::write_xml(MIOFILE& f, const char* tag, bool temp_file) 
         f.printf(
             "      <device_num>%d</device_num>\n"
             "      <peak_flops>%f</peak_flops>\n"
+            "      <peak_flops_dp>%f</peak_flops_dp>\n"
+            "      <have_fp64>%d</have_fp64>\n"
             "      <opencl_available_ram>%f</opencl_available_ram>\n"
             "      <opencl_device_index>%d</opencl_device_index>\n"
             "      <warn_bad_cuda>%d</warn_bad_cuda>\n",
             device_num,
             peak_flops,
+            peak_flops_dp,
+            have_fp64 ? 1 : 0,
             opencl_available_ram,
             opencl_device_index,
             warn_bad_cuda
@@ -222,6 +226,8 @@ int OPENCL_DEVICE_PROP::parse(XML_PARSER& xp, const char* end_tag) {
             continue;
         }
         if (xp.parse_double("peak_flops", peak_flops)) continue;
+        if (xp.parse_double("peak_flops_dp", peak_flops_dp)) continue;
+        if (xp.parse_bool("have_fp64", have_fp64)) continue;
         if (xp.parse_double("opencl_available_ram", opencl_available_ram)) continue;
         if (xp.parse_int("opencl_device_index", n)) {
             opencl_device_index = n;
@@ -274,12 +280,22 @@ void OPENCL_DEVICE_PROP::description(char* buf, int buflen, const char* type) {
     strlcpy(s1, opencl_device_version, sizeof(s1));
     n = (int)strlen(s1) - 1;
     if ((n > 0) && (s1[n] == ' ')) s1[n] = '\0';
+    char dp[64];
+    if (peak_flops_dp > 0) {
+        snprintf(dp, sizeof(dp), ", %s FP64",
+            flops_to_string(peak_flops_dp).c_str()
+        );
+    } else if (have_fp64) {
+        snprintf(dp, sizeof(dp), ", FP64 supported");
+    } else {
+        dp[0] = 0;
+    }
     snprintf(s2, sizeof(s2),
-        "%.64s (driver version %.64s, device version %.64s, %.2fGB, %.2fGB available, %s peak)",
+        "%.64s (driver version %.64s, device version %.64s, %.2fGB, %.2fGB available, %s peak%s)",
         name, opencl_driver_version,
         s1, (double)global_mem_size/GIGA,
         opencl_available_ram/GIGA,
-        flops_to_string(peak_flops).c_str()
+        flops_to_string(peak_flops).c_str(), dp
     );
 
     switch(is_used) {
