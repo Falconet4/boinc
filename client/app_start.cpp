@@ -914,7 +914,12 @@ int ACTIVE_TASK::start() {
         safe_strcat(cmdline, " ");
         safe_strcat(cmdline, result->cmdline);
     }
-    parse_command_line(cmdline, argv+1);
+    if (parse_command_line(cmdline, argv+1, 99) < 0) {
+        snprintf(buf, sizeof(buf), "Too many arguments in command line");
+        chdir(current_dir);
+        retval = ERR_BUFFER_OVERFLOW;
+        goto error;
+    }
     if (log_flags.task_debug) {
         debug_print_argv(argv);
     }
@@ -1134,7 +1139,11 @@ int ACTIVE_TASK::start() {
             argv[0] = const_cast<char*>(SWITCHER_FILE_NAME);
             argv[1] = buf;
             argv[2] = exec_name;
-            parse_command_line(cmdline, argv+3);
+            if (parse_command_line(cmdline, argv+3, 97) < 0) {
+                fprintf(stderr, "Too many arguments in command line\n");
+                fflush(NULL);
+                _exit(E2BIG);
+            }
             if (log_flags.task_debug) {
                 debug_print_argv(argv);
             }
@@ -1146,7 +1155,11 @@ int ACTIVE_TASK::start() {
             retval = execv(switcher_path, argv);
         } else {
             argv[0] = buf;
-            parse_command_line(cmdline, argv+1);
+            if (parse_command_line(cmdline, argv+1, 99) < 0) {
+                fprintf(stderr, "Too many arguments in command line\n");
+                fflush(NULL);
+                _exit(E2BIG);
+            }
             retval = execv(buf, argv);
         }
         fprintf(stderr,

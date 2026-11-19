@@ -68,7 +68,9 @@ int switcher_exec(const char *util_filename, const char* cmdline) {
     argv[0] = const_cast<char*>(util_filename);
     // Make a copy of cmdline because parse_command_line modifies it
     safe_strcpy(command, cmdline);
-    parse_command_line(const_cast<char*>(cmdline), argv+1);
+    if (parse_command_line(command, argv+1, 99) < 0) {
+        return ERR_BUFFER_OVERFLOW;
+    }
 
     // Create the output pipes
     if (pipe(fds_out) == -1) {
@@ -153,7 +155,7 @@ int switcher_exec(const char *util_filename, const char* cmdline) {
             if (log_flags.task_debug) {
                 msg_printf(0, MSG_INTERNAL_ERROR, "[task_debug] failure in switcher_exec");
                 msg_printf(0, MSG_INTERNAL_ERROR, "[task_debug]   switcher: %s", util_path);
-                msg_printf(0, MSG_INTERNAL_ERROR, "[task_debug]    command: %s", command);
+                msg_printf(0, MSG_INTERNAL_ERROR, "[task_debug]    command: %s", cmdline);
                 msg_printf(0, MSG_INTERNAL_ERROR, "[task_debug]  exit code: %d", retval);
                 msg_printf(0, MSG_INTERNAL_ERROR, "[task_debug]     stdout: %s", output_out.c_str());
                 msg_printf(0, MSG_INTERNAL_ERROR, "[task_debug]     stderr: %s", output_err.c_str());

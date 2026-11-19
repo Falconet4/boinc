@@ -873,7 +873,7 @@ int TASK::run(const vector<string> &child_args) {
             stdout_file = freopen(stdout_path.c_str(), "a", stdout);
             if (!stdout_file) {
                 fprintf(stderr, "Can't open %s for stdout; exiting\n", stdout_path.c_str());
-                return ERR_FOPEN;
+                _exit(ERR_FOPEN);
             }
         }
         if (stdin_filename != "") {
@@ -881,7 +881,7 @@ int TASK::run(const vector<string> &child_args) {
             stdin_file = freopen(stdin_path.c_str(), "r", stdin);
             if (!stdin_file) {
                 fprintf(stderr, "Can't open %s for stdin; exiting\n", stdin_path.c_str());
-                return ERR_FOPEN;
+                _exit(ERR_FOPEN);
             }
         }
         if (stderr_filename != "") {
@@ -889,7 +889,7 @@ int TASK::run(const vector<string> &child_args) {
             stderr_file = freopen(stderr_path.c_str(), "a", stderr);
             if (!stderr_file) {
                 fprintf(stderr, "Can't open %s for stderr; exiting\n", stderr_path.c_str());
-                return ERR_FOPEN;
+                _exit(ERR_FOPEN);
             }
         }
 
@@ -898,7 +898,10 @@ int TASK::run(const vector<string> &child_args) {
         //
         argv[0] = app_path;
         strlcpy(arglist, command_line.c_str(), sizeof(arglist));
-        parse_command_line(arglist, argv+1);
+        if (parse_command_line(arglist, argv+1, 255) < 0) {
+            fprintf(stderr, "Too many arguments in command line\n");
+            _exit(ERR_BUFFER_OVERFLOW);
+        }
         if (priority_val) {
             setpriority(PRIO_PROCESS, 0, priority_val);
         }

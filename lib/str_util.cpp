@@ -67,11 +67,20 @@ size_t strlcat(char *dst, const char *src, size_t size) {
     size_t dst_len = strlen(dst);
     size_t src_len = strlen(src);
 
-    if (size) {
-        size_t len = (src_len >= size-dst_len) ? (size-dst_len-1) : src_len;
-        memcpy(&dst[dst_len], src, len);
-        dst[dst_len + len] = '\0';
+    // If dst is not null-terminated within size, the standard says to
+    // return size + strlen(src) and copy nothing.  Without this check
+    // size-dst_len underflows and memcpy() writes past the buffer.
+    //
+    if (dst_len >= size) {
+        return size + src_len;
     }
+
+    size_t len = size - dst_len - 1;
+    if (src_len < len) {
+        len = src_len;
+    }
+    memcpy(dst + dst_len, src, len);
+    dst[dst_len + len] = '\0';
 
     return dst_len + src_len;
 }
@@ -261,9 +270,14 @@ void nbytes_to_string(double nbytes, double total_bytes, char* str, int len) {
 #define IN_DOUBLE_QUOTED_TOKEN      2
 #define IN_UNQUOTED_TOKEN           3
 
-int parse_command_line(char* p, char** argv) {
+int parse_command_line(char* p, char** argv, int max_args) {
     int state = NOT_IN_TOKEN;
     int argc=0;
+
+    // argv must have room for max_args entries, including the terminating NULL.
+    // Return an error rather than overrunning the caller's array.
+    //
+    if (max_args < 1) return -1;
 
     while (*p) {
         switch(state) {
@@ -271,15 +285,18 @@ int parse_command_line(char* p, char** argv) {
             if (isspace(*p)) {
             } else if (*p == '\'') {
                 p++;
+                if (argc >= max_args-1) return -1;
                 argv[argc++] = p;
                 state = IN_SINGLE_QUOTED_TOKEN;
                 break;
             } else if (*p == '\"') {
                 p++;
+                if (argc >= max_args-1) return -1;
                 argv[argc++] = p;
                 state = IN_DOUBLE_QUOTED_TOKEN;
                 break;
             } else {
+                if (argc >= max_args-1) return -1;
                 argv[argc++] = p;
                 state = IN_UNQUOTED_TOKEN;
             }

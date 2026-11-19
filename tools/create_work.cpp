@@ -482,7 +482,7 @@ int main(int argc, char** argv) {
                 JOB_DESC jd2 = jd;
                     // things default to what was passed on cmdline
                 strcpy(jd2.wu.name, "");
-                _argc = parse_command_line(buf, _argv);
+                _argc = parse_command_line(buf, _argv, 100);
                 jd2.parse_stdin_line(_argc, _argv);
                     // get info from stdin line
                 if (!strlen(jd2.wu.name)) {
@@ -524,7 +524,7 @@ int main(int argc, char** argv) {
                 check_buffer(buf, sizeof(buf));
                 JOB_DESC jd2 = jd;
                 strcpy(jd2.wu.name, "");
-                _argc = parse_command_line(buf, _argv);
+                _argc = parse_command_line(buf, _argv, 100);
                 jd2.parse_stdin_line(_argc, _argv);
                 if (!strlen(jd2.wu.name)) {
                     snprintf(jd2.wu.name, sizeof(jd2.wu.name), "%s_%d", jd.wu.name, j);
