@@ -28,6 +28,7 @@
 #include <sys/resource.h>
 #include <unistd.h>
 #include <cerrno>
+#include <cstdio>
 
 #if defined(__APPLE__) || defined(__FreeBSD__)
 #include <sys/sysctl.h>
@@ -85,6 +86,82 @@ void get_descendants(int pid, vector<int>& pids) {
     for (int dpid: pids) {
         fprintf(stderr, "   %d\n", dpid);
     }
+#endif
+}
+
+// A pid identifies a process only until that process exits: the OS may then
+// give the same pid to an unrelated process, and a pid list captured earlier
+// then points at processes that are not ours (often running as the same user,
+// so signalling them succeeds).  A start time, read while the process is known
+// to be ours, tells the two apart.
+//
+bool proc_start_time(int pid, PROC_START_TIME& start) {
+#ifdef _WIN32
+    HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    if (!h) return false;
+    FILETIME creation_time, exit_time, kernel_time, user_time;
+    BOOL ok = GetProcessTimes(
+        h, &creation_time, &exit_time, &kernel_time, &user_time
+    );
+    CloseHandle(h);
+    if (!ok) return false;
+    start = ((PROC_START_TIME)creation_time.dwHighDateTime << 32)
+        | (PROC_START_TIME)creation_time.dwLowDateTime;
+    return true;
+#elif defined(__linux__)
+    // /proc/<pid>/stat, field 22: start time, in clock ticks after boot
+    //
+    char path[64], buf[512];
+    snprintf(path, sizeof(path), "/proc/%d/stat", pid);
+    FILE* f = fopen(path, "r");
+    if (!f) return false;
+    bool found = false;
+    if (fgets(buf, sizeof(buf), f)) {
+        // Field 2 is the command name, in parentheses, and may itself contain
+        // spaces and parentheses, so start after the last ')'.  Fields 3
+        // (state) to 21 come before the start time: skip 19 of them.
+        //
+        const char* p = strrchr(buf, ')');
+        if (p) {
+            p++;
+            for (int field=3; field<22 && *p; field++) {
+                while (*p == ' ') p++;
+                while (*p && *p != ' ') p++;
+            }
+            while (*p == ' ') p++;
+            if (*p >= '0' && *p <= '9') {
+                PROC_START_TIME val = 0;
+                while (*p >= '0' && *p <= '9') {
+                    val = val*10 + (PROC_START_TIME)(*p - '0');
+                    p++;
+                }
+                start = val;
+                found = true;
+            }
+        }
+    }
+    fclose(f);
+    return found;
+#elif defined(__APPLE__) || defined(__FreeBSD__)
+    struct kinfo_proc info = {};
+    size_t size = sizeof(info);
+    int mib[4] = {CTL_KERN, KERN_PROC, KERN_PROC_PID, pid};
+    if (sysctl(mib, 4, &info, &size, nullptr, 0) != 0 || size == 0) {
+        return false;
+    }
+#if defined(__APPLE__)
+    const struct timeval& tv = info.kp_proc.p_starttime;
+#else
+    const struct timeval& tv = info.ki_start;
+#endif
+    if (tv.tv_sec == 0) return false;
+    start = (PROC_START_TIME)tv.tv_sec * 1000000ULL
+        + (PROC_START_TIME)tv.tv_usec;
+    return true;
+#else
+    (void)pid;
+    (void)start;
+    return false;
 #endif
 }
 
@@ -228,8 +305,27 @@ static bool process_is_zombie(int pid) {
 #endif
 }
 
-bool any_process_exists(vector<int>& pids) {
-    for (int pid: pids) {
+// True if this pid still refers to the process whose start time was recorded.
+// A recorded start time of 0 means "unknown" (the platform could not read it),
+// and then the pid alone is used, as this code did before start times existed.
+//
+static bool same_process(int pid, PROC_START_TIME recorded) {
+    if (!recorded) return true;
+    PROC_START_TIME now;
+    if (!proc_start_time(pid, now)) return false;   // exited
+    return now == recorded;
+}
+
+// True if any of these processes still exists, and is still the process whose
+// start time was recorded for it.
+//
+static bool any_process_exists(
+    const vector<int>& pids, const vector<PROC_START_TIME>& start_times
+) {
+    for (size_t i=0; i<pids.size(); i++) {
+        int pid = pids[i];
+        PROC_START_TIME recorded = (i<start_times.size())?start_times[i]:0;
+        if (!same_process(pid, recorded)) continue;
         // kill(pid, 0) tests for existence without reaping, but it also
         // succeeds for a zombie (an exited child that has not been
         // reaped).  Treat those as gone, or kill_descendants() waits the
@@ -242,6 +338,44 @@ bool any_process_exists(vector<int>& pids) {
         }
     }
     return false;
+}
+
+bool any_process_exists(vector<int>& pids) {
+    vector<PROC_START_TIME> start_times;
+    return any_process_exists(pids, start_times);
+}
+
+// Record the start time of each pid, so that a check or a kill made later can
+// tell our processes from unrelated ones that took over a pid.
+//
+static void record_start_times(
+    const vector<int>& pids, vector<PROC_START_TIME>& start_times
+) {
+    start_times.clear();
+    start_times.reserve(pids.size());
+    for (int pid: pids) {
+        PROC_START_TIME start = 0;
+        if (!proc_start_time(pid, start)) {
+            start = 0;
+        }
+        start_times.push_back(start);
+    }
+}
+
+// Drop the pids whose process has exited, or whose pid now belongs to another
+// process.
+//
+static void keep_original_processes(
+    vector<int>& pids, const vector<PROC_START_TIME>& start_times
+) {
+    size_t j = 0;
+    for (size_t i=0; i<pids.size(); i++) {
+        PROC_START_TIME recorded = (i<start_times.size())?start_times[i]:0;
+        if (same_process(pids[i], recorded)) {
+            pids[j++] = pids[i];
+        }
+    }
+    pids.resize(j);
 }
 
 #endif
@@ -275,18 +409,26 @@ void kill_descendants() {
 //
 void kill_descendants(int child_pid) {
     vector<int> descendants;
+    vector<PROC_START_TIME> start_times;
     // on Unix, ask main process nicely.
     // it descendants still exist after 10 sec, use the nuclear option
     //
     get_descendants(getpid(), descendants);
+    // Remember which process each pid was.  During the grace period below
+    // these processes can exit, and the OS can then give their pids to
+    // unrelated processes, which must not be waited for or killed: both the
+    // existence check and the kills are matched against these start times.
+    //
+    record_start_times(descendants, start_times);
     if (child_pid) {
         ::kill(child_pid, SIGTERM);
         for (int i=0; i<10; i++) {
-            if (!any_process_exists(descendants)) {
+            if (!any_process_exists(descendants, start_times)) {
                 return;
             }
             boinc_sleep(1);
         }
+        keep_original_processes(descendants, start_times);
         kill_all(descendants);
         // kill any processes that might have been created
         // in the last 10 secs

@@ -28,6 +28,16 @@
 #endif
 
 extern void get_descendants(int pid, std::vector<int>& pids);
+
+// A pid identifies a process only until that process exits: the OS may then
+// give the same pid to an unrelated process.  A start time, read while the
+// process is known to be ours, tells the two apart.  The unit is whatever the
+// platform reports, so values are only ever compared with another value read
+// for the same pid.  0 means "unknown".
+//
+typedef unsigned long long PROC_START_TIME;
+extern bool proc_start_time(int pid, PROC_START_TIME& start);
+
 extern bool any_process_exists(std::vector<int>& pids);
 extern void kill_all(std::vector<int>& pids);
 #ifdef _WIN32
