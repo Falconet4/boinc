@@ -642,6 +642,12 @@ function valid_tokens() {
     }
     if (!$ttok) return false;
 
+    // Only a decimal timestamp is meaningful: anything else cannot be the
+    // digest's input, and the arithmetic below needs a number.
+    //
+    if (!ctype_digit((string)$tnow)) return false;
+    $tnow = (int)$tnow;
+
     $t = md5((string)$tnow.$user->authenticator);
     // Constant time, and a string comparison: "!=" on two numeric strings
     // compares them as numbers, so a digest of the form "0e..." would match
@@ -649,6 +655,10 @@ function valid_tokens() {
     // no reason to leak where a comparison stopped.
     //
     if (!hash_equals($t, (string)$ttok)) return false;
+    // A token dated in the future would never expire.  Forging one needs the
+    // authenticator, so this only guards against a clock far out of step.
+    //
+    if ($tnow > time() + 300) return false;
     if (time() > $tnow + 86400) return false;
     return true;
 }
