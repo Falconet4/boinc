@@ -49,15 +49,21 @@ if( isset($_GET["l"]) ){
     $l = 0;
 }
 
+// What goes into the page is escaped here; $s and $f keep their raw form for
+// the shell, where each is quoted or restricted separately.
+//
+$s_html = htmlspecialchars($s, ENT_QUOTES);
+$f_html = htmlspecialchars($f, ENT_QUOTES);
+
 if ($s) {
-    admin_page_head("Grep logs for \"$s\"");
+    admin_page_head("Grep logs for \"" . $s_html . "\"");
 } else {
     admin_page_head("Show logs");
 }
 
 echo "<form action=\"show_log.php\">";
-echo " Regexp: <input name=\"s\" value=\"$s\">";
-echo " Files: <input name=\"f\" value=\"$f\">";
+echo " Regexp: <input name=\"s\" value=\"" . $s_html . "\">";
+echo " Files: <input name=\"f\" value=\"" . $f_html . "\">";
 echo " Lines: <input name=\"l\" value=\"$l\"> (positive for head, negative for tail)";
 echo " <input class=\"btn btn-default\" type=\"submit\" value=\"Grep\"></form>";
 
