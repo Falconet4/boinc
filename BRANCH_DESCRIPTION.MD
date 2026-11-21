@@ -49,8 +49,10 @@ into `kill(-1, SIGKILL)` and `waitpid(-1, ...)`.
 - `ASYNC_VERIFY` destructor ownership fixed: it could delete buffers the caller
   still owned.
 - Descriptor leaks closed on error paths.
-- The exit flag set from the signal handler is no longer cleared by the main
-  loop.
+- The signal handler no longer calls `msg_printf()` from inside the handler —
+  it locks, formats and allocates, and could deadlock the client if the signal
+  arrived while the main thread held the stdio lock. It records the signal in a
+  `sig_atomic_t`; the main loop logs it and sets `requested_exit`.
 - `pthread_detach` used where a join would block; `sandbox` and `thread` paths
   corrected.
 

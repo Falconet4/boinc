@@ -607,7 +607,11 @@ int ACTIVE_TASK::setup_slot_dir(char *buf, unsigned int buf_len) {
 
     FILE *f = fopen(path, "w");
     if (!f) {
-        snprintf(buf, buf_len, "Can't create %s: %s", path, boincerror(errno));
+        // errno here is an errno value, not one of BOINC's codes: boincerror()
+        // would print "Error 13" for EACCES (or, worse, describe an unrelated
+        // BOINC code that happens to share the number).
+        //
+        snprintf(buf, buf_len, "Can't create %s: %s", path, strerror(errno));
         return ERR_FOPEN;
     }
     fclose(f);
