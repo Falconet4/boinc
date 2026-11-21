@@ -131,11 +131,25 @@ namespace {
                 }
                 return false;                       // "..", "...", ".. ", "   "
             }
+#ifdef _WIN32
+            // A colon inside a component is an alternate data stream
+            // ("report.txt:hidden"): it writes a second stream on a file already
+            // in the destination, invisible to a directory listing.  The drive
+            // letter check above only covers "C:...".
+            //
+            if (core.find(':') != string::npos) return false;
+#endif
             if (!norm.empty()) norm += '/';
             norm += core;
         }
 
-        if (norm.empty()) return false;
+        // Nothing left to create: an entry named "./" or "." is what "zip -r
+        // out.zip ." puts at the front of every archive.  That is not an attack
+        // and must not abort the extraction, so report success with an empty
+        // name and let the caller skip it -- unlike the false returns above,
+        // which mean "this name would escape the destination".
+        //
+        if (norm.empty()) return true;
         if (dir_entry) norm += '/';
         return true;
     }
@@ -278,6 +292,9 @@ int boinc_zip(
                 zip_discard(za);
                 return 2;
             }
+            // "." / "./": a no-op entry, not an error (see the normaliser).
+            //
+            if (safe_name.empty()) continue;
             name = safe_name;
 
             // Directory entry (convention: ends with '/')
