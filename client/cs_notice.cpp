@@ -187,11 +187,21 @@ static int parse_rss_time(char* buf) {
     char day_name[64], month_name[64];
     int day_num, year, h, m, s;
     // Bound the two strings: the RSS pubDate is project-controlled and "%s"
-    // has no width, so a long token overflows the 64-byte buffers.
+    // has no width, so a long token overflows the 64-byte buffers.  The widths
+    // alone are not enough: a short or malformed pubDate ("Thu,") converts
+    // fewer fields, and everything below would then read uninitialised stack --
+    // month_index() runs strstr() over month_name, which only stops at a NUL.
+    // So start from a known value and accept only a complete conversion.
     //
-    sscanf(buf, "%63s %d %63s %d %d:%d:%d",
-        day_name, &day_num, month_name, &year, &h, &m, &s
-    );
+    day_name[0] = 0;
+    month_name[0] = 0;
+    day_num = year = h = m = s = 0;
+    if (sscanf(buf, "%63s %d %63s %d %d:%d:%d",
+            day_name, &day_num, month_name, &year, &h, &m, &s
+        ) != 7
+    ) {
+        return 0;           // "no time", which is what the callers already do
+    }
 
     struct tm tm;
     tm.tm_sec = s;
