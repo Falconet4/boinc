@@ -958,8 +958,14 @@ void CSimpleFrame::OnDarkModeChanged( wxSysColourChangedEvent& WXUNUSED(event) )
 
     CDlgEventLog*   eventLog = wxGetApp().GetEventLog();
     if (eventLog) {
-        wxGetApp().OnEventLogClose();
-        delete eventLog;    // eventLog->Destroy() creates a race condition if used here.
+        // Detach the old dialog first, then let wxWidgets destroy it:
+        // Destroy() postpones the deletion to the next idle event, 'delete'
+        // would free the window that may still be inside this event.  That is
+        // only safe because OnEventLogClose() clears the app's pointer only if
+        // it still refers to this dialog, so the deferred destructor cannot
+        // unhook the replacement created on the next line.
+        wxGetApp().OnEventLogClose(eventLog);
+        eventLog->Destroy();
         wxGetApp().DisplayEventLog();
     }
 }

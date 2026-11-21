@@ -214,7 +214,7 @@ public:
 
     void                SetEventLogWasActive(bool wasActive) { m_bEventLogWasActive = wasActive; }
     void                DisplayEventLog(bool bShowWindow = true);
-    void                OnEventLogClose();
+    void                OnEventLogClose(CDlgEventLog* who);
 
     void                FireReloadSkin();
     void                FrameClosed()               { m_pFrame = NULL; }

@@ -73,7 +73,7 @@ CDlgEventLog::~CDlgEventLog() {
 
     m_iFilteredIndexes.Clear();
 
-    wxGetApp().OnEventLogClose();
+    wxGetApp().OnEventLogClose(this);
 
     wxLogTrace(wxT("Function Start/End"), wxT("CDlgEventLog::CDlgEventLog - Destructor Function End"));
 }

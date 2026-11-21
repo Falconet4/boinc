@@ -1272,7 +1272,17 @@ void CBOINCGUIApp::DisplayEventLog(bool bShowWindow) {
 }
 
 
-void CBOINCGUIApp::OnEventLogClose() {
+// 'who' is the dialog that is being closed.  Its destructor can run after a
+// replacement dialog has already been put in m_pEventLog: a theme change
+// destroys the old dialog and creates a new one in the same call, and
+// wxWindow::Destroy() (unlike 'delete') postpones the destruction until the
+// event is handled.  Clearing the slot unconditionally would then disconnect
+// the replacement, so the manager would lose its live Event Log and open a
+// second one on the next click.  Only clear the slot if it still holds the
+// dialog that is going away.
+//
+void CBOINCGUIApp::OnEventLogClose(CDlgEventLog* who) {
+    if (m_pEventLog != who) return;
     m_pEventLog = NULL;
     if (m_pFrame) {
         m_pFrame->UpdateRefreshTimerInterval();
