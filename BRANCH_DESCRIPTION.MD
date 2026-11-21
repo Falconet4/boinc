@@ -6,9 +6,9 @@ branch — much of what later PRs rely on (`xml_escape`, `parse_int` base
 handling) lives here; `shell_quote` is added in the shell-quoting PR, not this
 one.
 
-- **Base:** `upstream/master` (`d9fa5fb95`)
-- **Head:** `f1556f4e2`
-- **8 commits — 33 files — +540/−128 — 153 lib tests**
+- **Base:** `upstream/master` (`f7e5129c5`)
+- **Head:** `e122004c2`
+- **12 commits — 33 files — +640/−164** (code and tests; this file excluded)
 
 ## Why
 
@@ -19,7 +19,7 @@ benefits, rather than patching each call site.
 
 ## Commits
 
-### `ca59f8707` — lib: harden parsing, XML and shell output, and command-line bounds
+### `253caf142` — lib: harden parsing, XML and shell output, and command-line bounds
 
 *16 files (+217/−80)*
 
@@ -41,7 +41,7 @@ benefits, rather than patching each call site.
   helper, so `<foo>0100</foo>` is 100 in all five rather than octal 64 in four
   of them.
 
-### `6e31c70a3` — lib,client: harden buffered log, GUI RPC and writable-directory I/O
+### `b764967ad` — lib,client: harden buffered log, GUI RPC and writable-directory I/O
 
 *7 files (+179/−23)*
 
@@ -55,7 +55,7 @@ benefits, rather than patching each call site.
   plant a file or symlink at `GUI_RPC_FILE` (the data dir is group-writable).
 - **`gui_rpc_client`** parsing hardened; `[::1]:` port handling fixed.
 
-### `aced92145` — lib: bound the strlcat() destination scan
+### `5e91fc847` — lib: bound the strlcat() destination scan
 
 *4 files (+15/−16)*
 
@@ -64,7 +64,7 @@ end if the caller passed an unterminated buffer. It now scans only within
 `size`. Test data paths moved to `__FILE__`-relative resolution so the tests
 find their fixtures regardless of working directory.
 
-### `3eec47ff9` — sched: fix WORK_REQ and SCHED_CONFIG lifetime bugs
+### `2ab590c4a` — sched: fix WORK_REQ and SCHED_CONFIG lifetime bugs
 
 *6 files (+82/−8)*
 
@@ -75,7 +75,7 @@ find their fixtures regardless of working directory.
   `std::vector` members and leaked compiled regex vectors on a second parse.
   Now value-initialises and frees the old vectors first.
 
-### `e93213f95` — lib: terminate argv when parse_command_line() fails
+### `5d41d7fdc` — lib: terminate argv when parse_command_line() fails
 
 *1 file (+6/−4)*
 
@@ -83,7 +83,7 @@ On failure the function left `argv` in an intermediate state. It now
 NUL-terminates the array so a caller that ignores the return value cannot walk
 off the end.
 
-### `77f11a47d` — client: create the GUI RPC password file private, never follow a symlink, and stop making the auth nonce predictable
+### `b2ea6d742` — client: create the GUI RPC password file private, never follow a symlink, and stop making the auth nonce predictable
 
 *2 files (+27/−1)*
 
@@ -140,3 +140,60 @@ that way.
 The contributor of record is the human who opens the pull request, and they are
 responsible for the whole change: they read the full diff, verified it, ran and
 inspected the tests, and can speak to its licensing and its origin.
+
+## Commits added after this description was written
+
+The `## Commits` section above was written when the branch was shorter.  The
+commits below came later, from the review passes and the Linux test work.
+
+### `2c2681072` — lib, client, tools: close four gaps the second review found, and correct the summary
+
+- parse_long(), parse_ulong(), parse_ulonglong() and parse_bool() still passed
+  base 0 to strtol(), so the octal bug this branch fixed in parse_int() was
+  alive two functions below it: <foo>0100</foo> parsed as 64 for every long,
+  ulong, ulonglong and bool field.  One helper now, used by all five.
+- MFILE::close() freed buf but left len, and flush() keeps unwritten bytes in
+  len on a short write: the next puts() would write at buf+len in a fresh,
+  uninitialised block, and past it once len was large.  The retry path is
+  close() + open(), and open() starts empty, so clear len with the buffer.
+- switcher_exec() parsed a 1024-byte copy of the command line while logging the
+  real one; on macOS MAXPATHLEN is 1024, so a long slot path was cut mid-token
+  and the closing quote was lost.  Parse a copy of the whole line.
+- create_work passed parse_command_line()'s new -1 straight to
+  parse_stdin_line(), which then looped zero times: a stdin line with too many
+  fields produced a job from the defaults with no error.  Report it and skip
+  the line.
+
+### `6b37f84db` — client: close the read side of the GUI RPC password file, and fchmod the fd
+
+gui_rpc_auth.cfg was opened with fopen() for reading, and the O_NOFOLLOW
+hardening added earlier only covered creating it.  In sandbox mode the data
+directory is group-writable, so another member could replace the file with a
+symlink to a file of their choosing; at the next client start the first line of
+that file would become the GUI RPC password.  Read it with
+open(O_RDONLY|O_NOFOLLOW), require a regular file, and fdopen the descriptor.
+
+### `e122004c2` — tests: locate the OpenWrt model fixtures the way the other fixtures are found
+
+The three parse_openwrt_model* cases built their path from
+current_path().parent_path(), so they only found tests/unit-tests/testdata when
+the build directory happened to be a direct child of tests/ (the tests/gtest
+directory executeUnitTests.sh creates).  Built anywhere else they failed with a
+null model_file.  Their neighbours in the same file already use
+absolute(__FILE__), which is independent of the working directory; use that.
+
+
+## Verification, Linux, 21 November 2026
+
+* `./tests/executeUnitTests.sh` → **226/226** (client 7, lib 207, sched 11,
+  vboxwrapper 1), exit 0.  The lib cases this branch adds — `test_parse`,
+  `test_xml_escape`, `test_str_util`, `test_md5_file`, `test_shmem` — all pass.
+* Live client on Linux, private data directory and private GUI RPC port:
+  `gui_rpc_auth.cfg` is created `0600`; a symlink planted at that name is not
+  followed on read or on write (the target keeps its contents, the client warns
+  `Can't open gui_rpc_auth.cfg - fix permissions` and keeps a random in-memory
+  password, so the RPC stays authenticated).
+* GUI RPC end to end: `--get_state`, `--client_version`, `--get_cc_status`
+  answer, a wrong password returns `-155`, `--quit` exits cleanly.
+* Whole tree builds with 0 errors (43 warnings, all pre-existing classes: cURL
+  deprecations and format-truncation).
