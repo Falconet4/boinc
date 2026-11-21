@@ -47,6 +47,12 @@ int MFILE::open(const char* path, const char* mode) {
     f = boinc_fopen(path, mode);
     if (!f) return ERR_FOPEN;
     if (!buf) buf = (char*)malloc(64*1024);
+    // Start empty.  flush() keeps unwritten bytes in buf and len so a caller
+    // can retry, but the retry path is close() + open() (write_state_file()
+    // does exactly that), and close() frees buf: without this, the second
+    // attempt would resume at buf+len in a fresh, uninitialised buffer.
+    //
+    len = 0;
     return 0;
 }
 
