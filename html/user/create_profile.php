@@ -322,6 +322,7 @@ function show_profile_form($profile, $warning=null) {
     echo "
         <form action=", $_SERVER['PHP_SELF'], " method=\"POST\", ENCTYPE=\"multipart/form-data\">
     ";
+    echo form_tokens();
     start_table();
     show_description();
     show_questions($profile);
@@ -347,6 +348,12 @@ if ($min_credit && $user->expavg_credit < $min_credit) {
 }
 
 if (post_str("submit", true)) {
+    // Editing a profile is one of the state-changing actions this branch is
+    // about, and it was the one left without a token: another site could
+    // rewrite a logged-in user's profile, or wipe its picture, with a plain
+    // POST.
+    //
+    check_tokens();
     process_create_profile($user, $profile);
     clear_cache_entry("view_profile.php", "userid=$user->id");
     exit;

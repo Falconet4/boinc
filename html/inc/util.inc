@@ -643,7 +643,12 @@ function valid_tokens() {
     if (!$ttok) return false;
 
     $t = md5((string)$tnow.$user->authenticator);
-    if ($t != $ttok) return false;
+    // Constant time, and a string comparison: "!=" on two numeric strings
+    // compares them as numbers, so a digest of the form "0e..." would match
+    // "0".  The token cannot be forged without the authenticator, but there is
+    // no reason to leak where a comparison stopped.
+    //
+    if (!hash_equals($t, (string)$ttok)) return false;
     if (time() > $tnow + 86400) return false;
     return true;
 }
