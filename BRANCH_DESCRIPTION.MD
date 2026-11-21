@@ -2,8 +2,9 @@
 
 Build fix: the server tools cannot link when fmt is present.
 
-- **Base:** `upstream/master` (`d9fa5fb95`)
-- **Head:** `61a5970fb`
+- **Base:** `upstream/master` (`f7e5129c5`)
+- **Head:** `663ec68da`
+- **1 commits — 1 files — +7/−7** (code and tests; this file excluded)
 - **1 commit — 1 file — +7/−7**
 
 ## Why
@@ -24,7 +25,7 @@ based on current `master`, they all hit it until it lands.
 
 ## The commit
 
-### `61a5970fb` — build: drop $(FMT_LIBS) from the tools' _DEPENDENCIES
+### `f896f6714` — build: drop $(FMT_LIBS) from the tools' _DEPENDENCIES
 
 Removes it from the seven offending lines; it stays in every `_LDADD`, which is
 where a linker flag belongs. The remaining `_DEPENDENCIES` entries (`LIBSCHED`,
@@ -61,3 +62,12 @@ that way.
 The contributor of record is the human who opens the pull request, and they are
 responsible for the whole change: they read the full diff, verified it, ran and
 inspected the tests, and can speak to its licensing and its origin.
+
+
+## Verification, Linux, 21 November 2026
+
+* Full server build with fmt found through `pkg-config`: `sched/` and `tools/`
+  link — `cgi`, `feeder`, `transitioner`, `validator`-side helpers,
+  `create_work`, `sign_executable`, `remote_submit_test` — 0 errors.  Dropping
+  `$(FMT_LIBS)` from the `_DEPENDENCIES` lines does not break relinking or
+  `make -j24` from a clean tree.
