@@ -3,9 +3,9 @@
 Client runtime safety: process spawning, privilege dropping, file and directory
 handling, signal/thread races, and CPU benchmark setup.
 
-- **Base:** `upstream/master` (`d9fa5fb95`)
-- **Head:** `d8ebdf104`
-- **6 commits — 20 files — +795/−87 — 156 lib tests**
+- **Base:** `upstream/master` (`f7e5129c5`)
+- **Head:** `6ce8641b9`
+- **11 commits — 23 files — +1082/−90** (code and tests; this file excluded)
 
 ## Why
 
@@ -16,7 +16,7 @@ into `kill(-1, SIGKILL)` and `waitpid(-1, ...)`.
 
 ## Commits
 
-### `54efadc6f` — client: fix file creation, device validation and statfs handling
+### `d42fbefa7` — client: fix file creation, device validation and statfs handling
 
 *6 files (+132/−26)*
 
@@ -28,7 +28,7 @@ into `kill(-1, SIGKILL)` and `waitpid(-1, ...)`.
 - **`statfs`** rewritten with Linux filesystem magic numbers defined locally.
 - `log_flags`, `hostinfo_linux` and `coproc` adjusted to match.
 
-### `d821033a5` — client,lib,packages: fail closed on privilege drop, avoid shell rename, and treat zombies as exited
+### `7eab55665` — client,lib,packages: fail closed on privilege drop, avoid shell rename, and treat zombies as exited
 
 *5 files (+163/−36)*
 
@@ -42,7 +42,7 @@ into `kill(-1, SIGKILL)` and `waitpid(-1, ...)`.
 - **`lib/proc_control`**: `any_process_exists()` treats zombies as exited.
 - The two generic-installer `sea` scripts updated to match.
 
-### `587a56b20` — client: fix async verification, descriptor leaks and signal/thread races
+### `620038340` — client: fix async verification, descriptor leaks and signal/thread races
 
 *7 files (+93/−16)*
 
@@ -56,7 +56,7 @@ into `kill(-1, SIGKILL)` and `waitpid(-1, ...)`.
 - `pthread_detach` used where a join would block; `sandbox` and `thread` paths
   corrected.
 
-### `76e05cf87` — lib: preserve directory moves across filesystems, and resolve executables before fork
+### `0e9524d89` — lib: preserve directory moves across filesystems, and resolve executables before fork
 
 *4 files (+402/−12)*
 
@@ -70,7 +70,7 @@ into `kill(-1, SIGKILL)` and `waitpid(-1, ...)`.
   wrong directory.
 - 138 lines of new tests in `test_util`.
 
-### `f3ae25ba6` — client: bound the device index in the no-resource check
+### `ae6cfb337` — client: bound the device index in the no-resource check
 
 *1 file (+3/−1)*
 
@@ -108,3 +108,63 @@ that way.
 The contributor of record is the human who opens the pull request, and they are
 responsible for the whole change: they read the full diff, verified it, ran and
 inspected the tests, and can speak to its licensing and its origin.
+
+## Commits added after this description was written
+
+The `## Commits` section above was written when the branch was shorter.  The
+commits below came later, from the review passes and the Linux test work.
+
+### `4c0fb7096` — client: report errno as errno, and say what the switcher actually does
+
+open_slots_file() formatted a failed fopen() with boincerror(errno), which
+switches over BOINC and HTTP codes: EACCES printed "Error 13", and a colliding
+number would print an unrelated description.  strerror(errno), as the rest of
+this branch does.
+
+### `8320c9570` — lib: do not follow a symlink when copying across filesystems
+
+boinc_rename_aux() lstat()s the source and then hands the name to
+boinc_copy_atomic(), which reopened it with a plain fopen().  Between the two a
+symlink can be swapped in, and the copy then takes the link target's content --
+anything the client can read, gui_rpc_auth.cfg included -- instead of the file
+the caller checked.  Open with O_RDONLY|O_NOFOLLOW, require a regular file, and
+fdopen the descriptor.
+
+### `0afdd8445` — lib: do not signal a pid whose process has been replaced
+
+kill_descendants() builds the list of the calling process's descendants, asks
+the app to exit, then polls that list for up to 10 seconds before SIGTERMing
+whatever is left.  A pid identifies a process only until that process exits:
+during those 10 seconds a descendant can exit, the OS can hand its pid to an
+unrelated process running as the same user, and kill_all() then signals that
+process.  The same stale pid also kept the poll from returning as soon as our
+own processes were gone.
+
+### `6ce8641b9` — tests: read and write the right ends of the pipe in the POSIX case
+
+test_proc_control's start_time_is_gone_after_the_process_exits used the pipe
+backwards: pipe() returns read then write, but the child read fds[1] and the
+parent wrote fds[0], so both got EBADF and the ASSERT_EQ on the write failed on
+every POSIX run.  The Windows half was never affected because the case is
+compiled out there, which is why this is the first run that saw it.
+
+
+## Verification, Linux, 21 November 2026
+
+* `boinc_rename()` cross-filesystem paths, against a real `EXDEV` mount
+  (`/tmp` ↔ `/dev/shm`), 18 checks: regular file (content and mode 0640
+  preserved), directory tree, symlink (the link moves, the target is not
+  copied), FIFO, `waitpid()` `ECHILD` inference under `SIGCHLD=SIG_IGN`, and the
+  "destination is a directory" refusal (nothing nested).  Only cosmetic
+  deviation: an unwritable cross-device destination reports `ERR_FOPEN` (-108)
+  rather than `ERR_RENAME` (-109); the source is kept and nothing is written.
+* No shell in the fallback: names containing `;`, `$()`, backticks, quotes and a
+  newline all move without executing anything.
+* `proc_start_time()` equals an independent parse of `/proc/<pid>/stat` field 22,
+  including a `comm` containing `)` and a space, and is unavailable after the
+  process exits and is reaped.
+* `kill_descendants(child_pid)`: a well-behaved tree is killed after the 10 s
+  grace; a tree that ignores `SIGTERM` survives, because POSIX `kill_all()`
+  sends `SIGTERM` while Windows terminates — pre-existing, unchanged here.
+* `test_proc_control`'s POSIX case is fixed on this branch: it read and wrote the
+  wrong ends of its pipe and failed on every Linux run (`fix` in the list above).
