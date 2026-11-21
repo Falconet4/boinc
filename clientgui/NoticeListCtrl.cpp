@@ -290,20 +290,25 @@ void CNoticeListCtrl::Clear() {
 
 #if wxUSE_WEBVIEW
 void CNoticeListCtrl::OnLinkClicked( wxWebViewEvent& event ) {
-    if (is_http_url(event.GetURL())) {
+    wxString url = event.GetURL();
+    if (is_http_url(url)) {
         // Open externally rather than inside the manager.
         event.Veto();   // Tell wxWebView not to follow link
-		    wxLaunchDefaultBrowser(event.GetURL());
-    } else {
-        // The notices page itself is presented through this event as
-        // "about:blank", so vetoing it here would leave the pane blank
-        // (verified against wx 3.2.4 / WebKit).  Nothing else can arrive from
-        // project content: the href below and every sanitised description link
-        // is http(s)-only, and a javascript: URL does not raise this event at
-        // all - so the scheme gate, not this handler, is what closes the hole.
-        //
-        event.Skip();
+        wxLaunchDefaultBrowser(url);
+        return;
     }
+    // Default deny.  The only navigation this pane may perform itself is the
+    // initial load of the empty page, which arrives here as "about:blank"
+    // (verified against wx 3.2.4 / WebKit); vetoing that one would leave the
+    // pane blank, so it is allowed and everything else is not.  Relative links
+    // reach this event because url_is_safe() deliberately admits them, so the
+    // handler cannot rely on the scheme gate alone.
+    //
+    if (url == "about:blank" || url.empty()) {
+        event.Skip();
+        return;
+    }
+    event.Veto();
 }
 
 

@@ -892,11 +892,6 @@ std::string html_escape(const std::string& in) {
 //
 static bool url_is_safe(const std::string& u) {
     size_t i = 0;
-    // Set once a tag scan finds no '>' anywhere after it: then no later '<'
-    // can have one either, so its branch below must not scan again.  Without
-    // this, a notice full of "<a" with no closing ">" costs O(n^2) and freezes
-    // the manager; the description is project-supplied and unbounded.
-    bool no_gt_left = false;
     while (i < u.size() && isspace((unsigned char)u[i])) i++;
     if (i >= u.size()) return false;
     // find scheme end
@@ -958,11 +953,6 @@ static std::string html_unescape_attr(const std::string& in) {
     std::string out;
     out.reserve(in.size());
     size_t i = 0;
-    // Set once a tag scan finds no '>' anywhere after it: then no later '<'
-    // can have one either, so its branch below must not scan again.  Without
-    // this, a notice full of "<a" with no closing ">" costs O(n^2) and freezes
-    // the manager; the description is project-supplied and unbounded.
-    bool no_gt_left = false;
     while (i < in.size()) {
         if (in[i] != '&') { out += in[i++]; continue; }
         if (!in.compare(i, 4, "&lt;"))   { out += '<';  i += 4; continue; }
@@ -1084,9 +1074,10 @@ std::string html_sanitize(const std::string& in) {
             }
         }
         if (!closed) {
-            // unterminated tag: escape the '<' and carry on.  The name scan
-            // stopped at j, so everything from j on has been searched: there
-            // is no '>' left anywhere after this point.
+            // unterminated tag (or one whose last quote is never closed):
+            // escape the '<' and carry on.  The scan ran to the end of the
+            // input without finding an unquoted '>', so no later '<' can close
+            // a tag either.
             no_gt_left = true;
             out += "&lt;";
             i++;
