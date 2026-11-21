@@ -82,10 +82,17 @@ if [[ "$OSTYPE" == "darwin"* ]]; then
 else
     MODULES="client lib sched vboxwrapper"
 fi
+status=0
 for T in ${MODULES}; do
     XML_FLAGS=""
     if [ "${xml}" = "yes" ]; then
         XML_FLAGS="--gtest_output=xml:${T}_xml_report.xml"
     fi
-    [ -d "${T}" ] && ./${T}/test_${T} ${XML_FLAGS};
+    # Run every module even when an earlier one fails: with `set -e` a bare
+    # call stopped the loop at the first failing suite, so a client failure
+    # hid the lib, sched and vboxwrapper results.
+    if [ -d "${T}" ] && ! ./${T}/test_${T} ${XML_FLAGS}; then
+        status=1
+    fi
 done
+exit $status

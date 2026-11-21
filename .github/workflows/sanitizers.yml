@@ -76,7 +76,8 @@ jobs:
             libtool-bin autoconf-archive libcurl4-openssl-dev libssl-dev \
             zlib1g-dev libnotify-dev libxss-dev libxmu-dev libxi-dev \
             libxxf86vm-dev freeglut3-dev libftgl-dev libzip-dev libjpeg-dev \
-            nlohmann-json3-dev ocl-icd-opencl-dev pkg-config build-essential
+            nlohmann-json3-dev ocl-icd-opencl-dev pkg-config build-essential \
+            libfmt-dev
 
       - name: Configure
         run: |
