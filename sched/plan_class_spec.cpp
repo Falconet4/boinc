@@ -301,7 +301,7 @@ static bool amd_select_devices(
 //
 static bool gpu_select_devices(
     const GPU_DEVICE_REQUIREMENTS& req,
-    const std::vector<GPU_DEVICE>& devices, const COPROC& cp,
+    const std::vector<GPU_DEVICE>& devices,
     HOST_USAGE& hu, COPROC& cp_dev, GPU_DEVICE& best,
     double& gpu_ram_min, bool& per_device
 ) {
@@ -311,7 +311,7 @@ static bool gpu_select_devices(
 
     int best_index = -1;
     int n_matches = gpu_matching_devices(
-        req, devices, cp, hu.gpu_device_nums, MAX_COPROC_INSTANCES,
+        req, devices, hu.gpu_device_nums, MAX_COPROC_INSTANCES,
         best_index, gpu_ram_min
     );
     hu.n_gpu_device_nums = n_matches;
@@ -887,7 +887,7 @@ bool PLAN_CLASS_SPEC::check(
         vreq.max_gpu_peak_flops = max_gpu_peak_flops;
         GPU_DEVICE best_gpu;
         if (!gpu_select_devices(
-            vreq, cp.devices, cp, hu, cp_dev_n, best_gpu, gpu_ram_min,
+            vreq, cp.devices, hu, cp_dev_n, best_gpu, gpu_ram_min,
             per_device
         )) {
             return false;
@@ -931,8 +931,14 @@ bool PLAN_CLASS_SPEC::check(
         if (min_driver_version) {
             gpu_requirements[PROC_TYPE_NVIDIA_GPU].update(abs(min_driver_version), 0);
         }
+        // Everything below must describe the device this task would get, not
+        // the fastest one on the host: cp_dev_n holds the selected device when
+        // the client reported a list, and the aggregate otherwise.
+        //
+        const COPROC_NVIDIA& cv = per_device ? cp_dev_n : cp;
+
         // compute capability
-        int v = (cp.cuda_prop.major)*100 + cp.cuda_prop.minor;
+        int v = (cv.cuda_prop.major)*100 + cv.cuda_prop.minor;
         if (min_nvidia_compcap && min_nvidia_compcap > v) {
             if (config.debug_version_select) {
                 log_messages.printf(MSG_NORMAL,
@@ -953,26 +959,26 @@ bool PLAN_CLASS_SPEC::check(
         }
         if (cuda) {
             // CUDA version
-            if (min_cuda_version && min_cuda_version > cp.cuda_version) {
+            if (min_cuda_version && min_cuda_version > cv.cuda_version) {
                 if (config.debug_version_select) {
                     log_messages.printf(MSG_NORMAL,
                         "[version] plan_class_spec: CUDA version required min: %d, supplied: %d\n",
-                        min_cuda_version, cp.cuda_version
+                        min_cuda_version, cv.cuda_version
                     );
                 }
                 return false;
             }
-            if (max_cuda_version && max_cuda_version < cp.cuda_version) {
+            if (max_cuda_version && max_cuda_version < cv.cuda_version) {
                 if (config.debug_version_select) {
                     log_messages.printf(MSG_NORMAL,
                         "[version] plan_class_spec: CUDA version required max: %d, supplied: %d\n",
-                        max_cuda_version, cp.cuda_version
+                        max_cuda_version, cv.cuda_version
                     );
                 }
                 return false;
             }
         }
-        gpu_ram = cp.cuda_prop.totalGlobalMem;
+        gpu_ram = cv.cuda_prop.totalGlobalMem;
         if (cp.bad_gpu_peak_flops("NVIDIA", msg)) {
             log_messages.printf(MSG_NORMAL, "%s\n", msg.c_str());
         }
@@ -1008,7 +1014,7 @@ bool PLAN_CLASS_SPEC::check(
         vreq.max_gpu_peak_flops = max_gpu_peak_flops;
         GPU_DEVICE best_gpu;
         if (!gpu_select_devices(
-            vreq, sreq.coprocs.intel_gpu.devices, cp, hu, cp_dev_i,
+            vreq, sreq.coprocs.intel_gpu.devices, hu, cp_dev_i,
             best_gpu, gpu_ram_min, per_device
         )) {
             return false;
@@ -1067,7 +1073,7 @@ bool PLAN_CLASS_SPEC::check(
         vreq.max_gpu_peak_flops = max_gpu_peak_flops;
         GPU_DEVICE best_gpu;
         if (!gpu_select_devices(
-            vreq, sreq.coprocs.apple_gpu.devices, cp, hu, cp_dev_a,
+            vreq, sreq.coprocs.apple_gpu.devices, hu, cp_dev_a,
             best_gpu, gpu_ram_min, per_device
         )) {
             return false;

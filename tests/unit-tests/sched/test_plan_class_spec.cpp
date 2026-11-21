@@ -153,10 +153,6 @@ TEST(test_plan_class_spec, nvidia_heterogeneous_set) {
     devices.push_back(make_gpu_device(
         "RTX 4090", 1, 8, 9, 12000, true, 82.6e12, 1.29e12, 24e9
     ));
-    COPROC cp;
-    cp.count = 2;
-    cp.device_nums[0] = 0;
-    cp.device_nums[1] = 1;
 
     GPU_DEVICE_REQUIREMENTS req;
     req.min_compcap = 800;
@@ -164,7 +160,7 @@ TEST(test_plan_class_spec, nvidia_heterogeneous_set) {
     int best = -1;
     double min_ram = 0;
     int n = gpu_matching_devices(
-        req, devices, cp, nums, MAX_COPROC_INSTANCES, best, min_ram
+        req, devices, nums, MAX_COPROC_INSTANCES, best, min_ram
     );
     ASSERT_EQ(n, 1);
     EXPECT_EQ(nums[0], 1);
@@ -172,10 +168,58 @@ TEST(test_plan_class_spec, nvidia_heterogeneous_set) {
 
     GPU_DEVICE_REQUIREMENTS none;
     n = gpu_matching_devices(
-        none, devices, cp, nums, MAX_COPROC_INSTANCES, best, min_ram
+        none, devices, nums, MAX_COPROC_INSTANCES, best, min_ram
     );
     EXPECT_EQ(n, 2);
     EXPECT_DOUBLE_EQ(min_ram, 8e9);
+}
+
+// Every device the client reported is a candidate: the list it sends has
+// already had <ignore_gpu_instance> applied.  A COPROC that arrived from a
+// client document has its device_nums array zeroed (that array is the client's
+// own index mapping and is never transmitted), and filtering by it used to
+// admit device 0 only -- no work at all for a host whose usable devices are
+// 1..N.
+//
+TEST(test_plan_class_spec, zeroed_device_nums_is_not_a_filter) {
+    std::vector<GPU_DEVICE> devices;
+    devices.push_back(make_gpu_device(
+        "RTX 4090", 0, 8, 9, 12000, true, 82.6e12, 1.29e12, 24e9
+    ));
+    devices.push_back(make_gpu_device(
+        "RTX 4090", 1, 8, 9, 12000, true, 82.6e12, 1.29e12, 24e9
+    ));
+    devices.push_back(make_gpu_device(
+        "RTX 4090", 2, 8, 9, 12000, true, 82.6e12, 1.29e12, 24e9
+    ));
+
+    int nums[MAX_COPROC_INSTANCES];
+    int best = -1;
+    double min_ram = 0;
+    GPU_DEVICE_REQUIREMENTS req;
+    int n = gpu_matching_devices(
+        req, devices, nums, MAX_COPROC_INSTANCES, best, min_ram
+    );
+    EXPECT_EQ(n, 3);
+    EXPECT_EQ(nums[2], 2);
+
+    // The same, through a COPROC as parsed from a client: device_nums zeroed.
+    //
+    COPROC_AMD cp;
+    cp.clear();
+    cp.count = 2;
+    cp.devices.push_back(make_device(
+        "RX 9060 XT", "gfx1200", 1, false, 22.7e12, 0, 16.*1024.*1024.*1024.
+    ));
+    cp.devices.push_back(make_device(
+        "RX 9070 XT", "gfx1201", 2, false, 48.7e12, 0, 16.*1024.*1024.*1024.
+    ));
+    AMD_DEVICE_REQUIREMENTS areq;
+    n = amd_matching_devices(areq, cp, nums, MAX_COPROC_INSTANCES, best, min_ram);
+    EXPECT_EQ(n, 2);
+    EXPECT_EQ(nums[0], 1);
+    EXPECT_EQ(nums[1], 2);
+    EXPECT_EQ(best, 1);
 }
 
 TEST(test_plan_class_spec, vendor_matching_set) {
@@ -193,14 +237,11 @@ TEST(test_plan_class_spec, vendor_matching_set) {
     ));
     COPROC cp;
     cp.count = 3;
-    cp.device_nums[0] = 0;
-    cp.device_nums[1] = 1;
-    cp.device_nums[2] = 2;
     int nums[MAX_COPROC_INSTANCES];
     int best = -1;
     double min_ram = 0;
     int n = gpu_matching_devices(
-        req, devices, cp, nums, MAX_COPROC_INSTANCES, best, min_ram
+        req, devices, nums, MAX_COPROC_INSTANCES, best, min_ram
     );
     ASSERT_EQ(n, 2);
     EXPECT_EQ(nums[0], 0);
@@ -222,8 +263,6 @@ TEST(test_plan_class_spec, amd_matching_set) {
         "RX 9060 XT", "gfx1200", 1, false, 22.7e12, 0, 16.*1024.*1024.*1024.
     ));
     cp.count = 2;
-    cp.device_nums[0] = 0;
-    cp.device_nums[1] = 1;
 
     int nums[MAX_COPROC_INSTANCES];
     int best = -1;
@@ -233,11 +272,6 @@ TEST(test_plan_class_spec, amd_matching_set) {
     EXPECT_EQ(nums[0], 0);
     EXPECT_EQ(best, 0);
     EXPECT_DOUBLE_EQ(min_ram, 32.*1024.*1024.*1024.);
-
-    // Ignored/unavailable devices are not selected.
-    cp.device_nums[0] = 1;
-    n = amd_matching_devices(req, cp, nums, MAX_COPROC_INSTANCES, best, min_ram);
-    EXPECT_EQ(n, 0);
 }
 
 TEST(test_plan_class_spec, amd_ram_and_peak) {

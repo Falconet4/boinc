@@ -1155,22 +1155,48 @@ void COPROC_APPLE::get(vector<string>&) {
 }
 
 void COPROC_APPLE::correlate(bool, vector<int> &ignore_devs) {
-    if (!ignore_devs.empty() && ignore_devs[0]==0) return;
     if (apple_gpus.empty()) return;
+
+    // Every reported GPU becomes a device entry; the aggregate describes the
+    // first one that is not ignored.  <ignore_gpu_instance> is applied here, as
+    // the other vendors do, rather than by the "device 0" shortcut this used to
+    // take.
+    //
     devices.clear();
+    int first = -1;
     for (unsigned int i=0; i<apple_gpus.size(); i++) {
         COPROC_APPLE& a = apple_gpus[i];
-        a.device_num = i;
+        a.device_num = (int)i;
+        if (in_vector((int)i, ignore_devs)) {
+            a.is_used = COPROC_IGNORED;
+            continue;
+        }
+        if (first < 0) first = (int)i;
         GPU_DEVICE g;
         safe_strcpy(g.vendor, "apple");
         safe_strcpy(g.name, a.model);
-        g.device_num = i;
+        g.device_num = (int)i;
         g.metal_support = a.metal_support;
         g.ncores = a.ncores;
         g.peak_flops = a.peak_flops;
         g.total_ram = a.available_ram;
         if (devices.size() < MAX_COPROC_INSTANCES) devices.push_back(g);
     }
-    *this = apple_gpus[0];
+    if (first < 0) {
+        // Every GPU is ignored: report none, as AMD and NVIDIA do.
+        //
+        count = 0;
+        return;
+    }
+
+    // Copy the aggregate, but keep the list just built: the assignment would
+    // replace this->devices with the (empty) member of the source object, and
+    // correlate_opencl() fills the Metal entries' peak FLOPS, FP64 and RAM in
+    // from the OpenCL properties afterwards.
+    //
+    vector<GPU_DEVICE> devs;
+    devs.swap(devices);
+    *this = apple_gpus[first];
+    devices.swap(devs);
 }
 #endif
