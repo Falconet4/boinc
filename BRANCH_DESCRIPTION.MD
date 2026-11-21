@@ -3,9 +3,9 @@
 BOINC Manager correctness: RPC argument ownership, statistics, string
 localisation, remote-desktop validation, and link/row-colour fixes.
 
-- **Base:** `upstream/master` (`d9fa5fb95`)
-- **Head:** `b211faac0`
-- **5 commits — 12 files — +360/−58 — 150 lib tests**
+- **Base:** `upstream/master` (`f7e5129c5`)
+- **Head:** `84ecf59fb`
+- **7 commits — 16 files — +389/−65** (code and tests; this file excluded)
 
 ## Why
 
@@ -17,7 +17,7 @@ request its own storage.
 
 ## Commits
 
-### `571053eb3` — manager: fix statistics, localize parsing and remote desktop validation
+### `4494e393f` — manager: fix statistics, localize parsing and remote desktop validation
 
 *1 file (+76/−14)*
 
@@ -30,7 +30,7 @@ request its own storage.
   ASCII alphanumerics only — `wxIsalnum()` is locale-dependent and would accept
   non-ASCII characters the remote-desktop clients cannot handle.
 
-### `dd33e98bd` — manager,lib: fix RPC completion, RPC argument ownership and simple-GUI logic
+### `098ee1031` — manager,lib: fix RPC completion, RPC argument ownership and simple-GUI logic
 
 *9 files (+250/−40)*
 
@@ -44,14 +44,14 @@ request its own storage.
 - Simple-GUI panels: `rsc_desc_apple_gpu` cleared, `no_ati_pref` renamed to
   `rsc_desc_ati`, `CTransparentStaticBitmap` base class corrected.
 
-### `7f4666400` — manager: only open http(s) for a project-supplied graphics URL
+### `8538d4f84` — manager: only open http(s) for a project-supplied graphics URL
 
 *1 file (+16/−0)*
 
 The graphics "open in browser" path passed a project-supplied URL straight to
 the shell. Now gated on a http(s) scheme.
 
-### `009239420` — manager: disable alternate row colouring in the lists and the event log
+### `520f7c33e` — manager: disable alternate row colouring in the lists and the event log
 
 *3 files (+9/−2)*
 
@@ -91,3 +91,32 @@ that way.
 The contributor of record is the human who opens the pull request, and they are
 responsible for the whole change: they read the full diff, verified it, ran and
 inspected the tests, and can speak to its licensing and its origin.
+
+## Commits added after this description was written
+
+The `## Commits` section above was written when the branch was shorter.  The
+commits below came later, from the review passes and the Linux test work.
+
+### `84ecf59fb` — manager: clear the Event Log pointer only for the dialog being destroyed
+
+The theme-change rebuild deletes the Event Log dialog and immediately creates
+a replacement.  ~CDlgEventLog() calls OnEventLogClose(), which cleared
+m_pEventLog unconditionally, so the destructor of the old dialog wiped out the
+pointer to the new one: the manager then believed there was no Event Log, opened
+a second window on the next click, and UpdateRefreshTimerInterval() was
+computed from the wrong state.
+
+
+## Verification, Linux, 21 November 2026
+
+Manager built against wxWidgets 3.2.4 and driven on a live X session, attached to
+a client with 1 200+ tasks:
+
+* Advanced view renders the full queue (progress, state, application, deadline),
+  the notebook tabs, the sidebar commands and the status bar.
+* Simple view switches in (`Ctrl+Shift+V`) and back (`Ctrl+Shift+A`) with a new
+  frame each time and the task list intact; no chrome or menu artefacts.
+* Event Log (`Ctrl+Shift+E`) opens with the live client messages; close → reopen
+  → close gives exactly one dialog each time (new window id per open), and the
+  Manager never crashes — the `OnEventLogClose(who)` + `Destroy()` path.
+* `Ctrl+Q` and `Alt+F4` both exit with status 0, no window or coredump left.
