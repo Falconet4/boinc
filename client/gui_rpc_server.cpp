@@ -119,6 +119,29 @@ bool GUI_RPC_CONN_SET::recent_rpc_needs_network(double interval) {
     return false;
 }
 
+#ifndef _WIN32
+// Mode for gui_rpc_auth.cfg: owner-only, widened to the group when the client
+// runs as group "boinc" (and, in the Mac sandbox, always).  Applied with
+// fchmod() to the descriptor, never chmod() to the name: chmod() follows
+// symlinks, so it would change the mode of a planted target.
+//
+static mode_t gui_rpc_passwd_mode() {
+#if defined(__APPLE__)
+    if (g_use_sandbox) {
+        return S_IRUSR|S_IWUSR | S_IRGRP|S_IWGRP;
+    }
+    return S_IRUSR|S_IWUSR;
+#else
+    gid_t gid = getgid();
+    struct group* g = getgrgid(gid);
+    if (g && !strcmp(g->gr_name, "boinc")) {
+        return S_IRUSR|S_IWUSR | S_IRGRP;
+    }
+    return S_IRUSR|S_IWUSR;
+#endif
+}
+#endif
+
 // read the GUI RPC password from gui_rpc_auth.cfg;
 // create one if missing
 //
@@ -126,7 +149,32 @@ void GUI_RPC_CONN_SET::get_password() {
     int retval;
 
     safe_strcpy(password, "");
+
+    // Read side.  In sandbox mode the data dir is group-writable, so a
+    // symlink can be planted at this name; following it would adopt the first
+    // line of an attacker-chosen file as the RPC password.  Open with
+    // O_NOFOLLOW and require a regular file, so the hardening covers the read
+    // path as well as the create path below.
+    //
+#ifdef _WIN32
     FILE* f = fopen(GUI_RPC_PASSWD_FILE, "r");
+#else
+    int rflags = O_RDONLY;
+#ifdef O_NOFOLLOW
+    rflags |= O_NOFOLLOW;
+#endif
+    int rfd = open(GUI_RPC_PASSWD_FILE, rflags);
+    FILE* f = NULL;
+    if (rfd >= 0) {
+        struct stat sb;
+        if (!fstat(rfd, &sb) && S_ISREG(sb.st_mode)) {
+            f = fdopen(rfd, "r");
+        }
+        if (!f) {
+            ::close(rfd);
+        }
+    }
+#endif
     if (f) {
         if (fgets(password, 256, f)) {
             strip_whitespace(password);
@@ -153,19 +201,24 @@ void GUI_RPC_CONN_SET::get_password() {
 #ifndef _WIN32
     // Create the file with its final mode rather than fopen() (which uses
     // 0666 & ~umask) followed by chmod().  The old order left the password
-    // world-readable for the time between the two calls.  The chmod() below
-    // may still widen access to the group, but it only narrows or keeps it,
-    // never exposes the secret to others.
+    // world-readable for the time between the two calls.
     //
     // O_NOFOLLOW: in sandbox mode the data dir is group-writable, so another
     // member can plant a symlink here.  Without it a dangling link would make
     // us create the attacker's target file with the password in it.  With it
     // the open fails with ELOOP and we leave no file behind.
     //
-    int fd = open(
-        GUI_RPC_PASSWD_FILE,
-        O_WRONLY|O_CREAT|O_TRUNC|O_NOFOLLOW, S_IRUSR|S_IWUSR
-    );
+    int oflags = O_WRONLY|O_CREAT|O_TRUNC;
+#ifdef O_NOFOLLOW
+    oflags |= O_NOFOLLOW;
+#endif
+    int fd = open(GUI_RPC_PASSWD_FILE, oflags, S_IRUSR|S_IWUSR);
+    if (fd >= 0) {
+        // Widen group access on the descriptor we just created, not on the
+        // name: fchmod() cannot be redirected by a symlink.
+        //
+        fchmod(fd, gui_rpc_passwd_mode());
+    }
     f = (fd < 0) ? NULL : fdopen(fd, "w");
     if (fd >= 0 && !f) {
         ::close(fd);
@@ -186,29 +239,6 @@ void GUI_RPC_CONN_SET::get_password() {
             );
         }
     }
-#ifdef _WIN32
-#elif defined(__APPLE__)
-    // Mac: Make sure the password file is not world-read or write.
-    // If someone can read or set the password,
-    // they can cause code to execute as this user.
-    //
-    if (g_use_sandbox) {
-        // Allow group access so authorized administrator can modify it
-        chmod(GUI_RPC_PASSWD_FILE, S_IRUSR|S_IWUSR | S_IRGRP | S_IWGRP);
-    } else {
-        chmod(GUI_RPC_PASSWD_FILE, S_IRUSR|S_IWUSR);
-    }
-#else
-    // general case: allow group read if group is "boinc"
-    //
-    gid_t gid = getgid();
-    struct group *g = getgrgid(gid);
-    if (g && !strcmp(g->gr_name, "boinc")) {
-        chmod(GUI_RPC_PASSWD_FILE, S_IRUSR|S_IWUSR | S_IRGRP);
-    } else {
-        chmod(GUI_RPC_PASSWD_FILE, S_IRUSR|S_IWUSR);
-    }
-#endif
 }
 
 int GUI_RPC_CONN_SET::get_allowed_hosts() {
