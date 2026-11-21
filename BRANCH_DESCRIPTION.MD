@@ -2,8 +2,9 @@
 
 Core library hardening: parsing, string handling, XML output and command-line
 limits, plus the client's GUI RPC credential handling. This is the foundation
-branch — much of what later PRs rely on (`shell_quote`, `xml_escape`,
-`parse_int` base handling) lives here.
+branch — much of what later PRs rely on (`xml_escape`, `parse_int` base
+handling) lives here; `shell_quote` is added in the shell-quoting PR, not this
+one.
 
 - **Base:** `upstream/master` (`d9fa5fb95`)
 - **Head:** `f1556f4e2`
@@ -32,10 +33,13 @@ benefits, rather than patching each call site.
 - **`xml_unescape`** numeric entities: a reference has at most 4 digits and
   must end in `;`. The old code searched the whole remainder for `;` — O(n²)
   on hostile input.
-- **`shell_quote`** added: single-quote wrapping with `'\''` for embedded
-  quotes, the C equivalent of PHP's `escapeshellarg()`.
 - **`parse_command_line`** takes a `max_args` bound; samples and `create_work`
-  updated to pass it.
+  updated to pass it, and `create_work` now reports a line that did not fit
+  instead of silently building the job from the defaults.
+- **The number base fix covers every number parser**, not just `parse_int`:
+  `parse_long`, `parse_ulong`, `parse_ulonglong` and `parse_bool` share one
+  helper, so `<foo>0100</foo>` is 100 in all five rather than octal 64 in four
+  of them.
 
 ### `6e31c70a3` — lib,client: harden buffered log, GUI RPC and writable-directory I/O
 
@@ -93,7 +97,8 @@ off the end.
 ## Testing
 
 153 lib tests (including new cases for `parse_command_line` refusal, `xml_escape`
-short buffers and control bytes, and `shell_quote`). `lib`, `client`, `sched`
+short buffers and control bytes, and the `parse_int` base handling; `shell_quote`
+and its tests come with the shell-quoting PR). `lib`, `client`, `sched`
 build. Covered by the CI sanitizer job added in PR 6.
 
 ## Notes

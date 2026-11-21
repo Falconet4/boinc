@@ -57,7 +57,6 @@ bool g_use_sandbox = false;
 int switcher_exec(const char *util_filename, const char* cmdline) {
     char* argv[100];
     char util_path[MAXPATHLEN];
-    char command [1024];
     char buffer[1024];
     int fds_out[2], fds_err[2];
     int stat;
@@ -66,9 +65,13 @@ int switcher_exec(const char *util_filename, const char* cmdline) {
 
     snprintf(util_path, sizeof(util_path), "%s/%s", SWITCHER_DIR, util_filename);
     argv[0] = const_cast<char*>(util_filename);
-    // Make a copy of cmdline because parse_command_line modifies it
-    safe_strcpy(command, cmdline);
-    if (parse_command_line(command, argv+1, 99) < 0) {
+    // parse_command_line() writes into the string it is given, so parse a
+    // mutable copy of the whole command line.  A fixed 1 KB buffer truncated
+    // it: on macOS MAXPATHLEN is 1024, so a long slot path lost its closing
+    // quote and the switcher was asked to chown a mangled path.
+    //
+    std::string cmdline_copy(cmdline);
+    if (parse_command_line(&cmdline_copy[0], argv+1, 99) < 0) {
         return ERR_BUFFER_OVERFLOW;
     }
 

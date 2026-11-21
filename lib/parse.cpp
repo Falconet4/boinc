@@ -677,6 +677,16 @@ bool XML_PARSER::parse_string(const char* start_tag, string& str) {
     return flag;
 }
 
+// Base to read a number in an XML element with: base 10, except for an explicit
+// 0x prefix.  Base 0 would treat a leading zero as octal, so <foo>0100</foo>
+// would be 64 rather than 100.  Skip blanks for the probe, as strtol() does.
+//
+static int xml_int_base(const char* buf) {
+    const char* q = buf;
+    while (*q == ' ' || *q == '\t') q++;
+    return (q[0] == '0' && (q[1] == 'x' || q[1] == 'X')) ? 16 : 10;
+}
+
 // Same, for integers
 //
 bool XML_PARSER::parse_int(const char* start_tag, int& i) {
@@ -700,13 +710,7 @@ bool XML_PARSER::parse_int(const char* start_tag, int& i) {
         }
     }
     errno = 0;
-    // Base 10, except for an explicit 0x prefix; base 0 would treat a
-    // leading zero as octal.  Skip blanks for the probe, as strtol() does.
-    //
-    const char* q = buf;
-    while (*q == ' ' || *q == '\t') q++;
-    int base = (q[0] == '0' && (q[1] == 'x' || q[1] == 'X')) ? 16 : 10;
-    long val = strtol(buf, &end, base);
+    long val = strtol(buf, &end, xml_int_base(buf));
     // Consume the closing tag even when the value is bad, so the parser
     // stays in sync and the caller does not silently skip it.
     //
@@ -747,7 +751,7 @@ bool XML_PARSER::parse_long(const char* start_tag, long& i) {
         }
     }
     errno = 0;
-    long val = strtol(buf, &end, 0);
+    long val = strtol(buf, &end, xml_int_base(buf));
     if (errno) return false;
     if (end != buf+strlen(buf)) return false;
 
@@ -827,7 +831,7 @@ bool XML_PARSER::parse_ulong(const char* start_tag, unsigned long& x) {
         }
     }
     errno = 0;
-    unsigned long val = strtoul(buf, &end, 0);
+    unsigned long val = strtoul(buf, &end, xml_int_base(buf));
     if (errno) return false;
     if (end != buf+strlen(buf)) return false;
 
@@ -862,7 +866,7 @@ bool XML_PARSER::parse_ulonglong(const char* start_tag, unsigned long long& x) {
         }
     }
     errno = 0;
-    unsigned long long val = boinc_strtoull(buf, &end, 0);
+    unsigned long long val = boinc_strtoull(buf, &end, xml_int_base(buf));
     if (errno) return false;
     if (end != buf+strlen(buf)) return false;
 
@@ -897,7 +901,7 @@ bool XML_PARSER::parse_bool(const char* start_tag, bool& b) {
     eof = get(buf, sizeof(buf), is_tag);
     if (eof) return false;
     if (is_tag) return false;
-    bool val = (strtol(buf, &end, 0) != 0);
+    bool val = (strtol(buf, &end, xml_int_base(buf)) != 0);
     if (end != buf+strlen(buf)) return false;
 
     end_tag[0] = '/';
