@@ -69,6 +69,13 @@ public:
     //
     virtual void        RebuildForThemeChange();
 
+    // Whether the appearance in force right now is one the Manager draws in its
+    // dark colours.  Both frames' RebuildForThemeChange() apply this, and the
+    // coalescing compares it, so there is one definition of "dark" per change;
+    // it matches what BOINCGUIApp::OnInit() decided at start-up.
+    //
+    static bool         AppearanceIsDarkNow();
+
     // Re-apply the window's title-bar theme after a Windows theme change; see
     // the comment on the definition.  Called by the frames' RebuildForThemeChange().
     //
