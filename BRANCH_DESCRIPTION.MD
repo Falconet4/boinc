@@ -30,22 +30,30 @@ submits to one:
 | `team_remove_inactive_action.php` | removing inactive members |
 | `edit_forum_preferences_action.php` | forum preferences |
 | `host_edit_action.php` / `host_venue_action.php` | host venue |
+| `create_profile.php` | creating/editing the public profile |
 | `delete_profile.php` | account deletion |
 
-Forms updated to carry the token: `edit_forum_preferences_form.php`,
+Forms updated to carry the token: `create_profile_form` (`create_profile.php`),
+`edit_forum_preferences_form.php`,
 `host_edit_form.php`, `team_founder_transfer_form.php`,
 `team_remove_inactive_form.php`, plus the team helpers in `html/inc/team.inc`
 and `html/inc/host.inc` (`team_create_form` via `team_edit_form`).
 
-`delete_profile.php?cmd=delete` is a link rather than a form, so it carries the
-token in the URL via `url_tokens()`. `valid_tokens()` accepts the token from
-either GET or POST, so both shapes work.
+`delete_profile.php?cmd=delete` and the two host-venue forms are links or GET
+forms rather than POST forms, so they carry the token in the URL via
+`url_tokens()`. `valid_tokens()` accepts the token from either GET or POST, so
+both shapes work. A token in a URL is replayable for its lifetime (24 h) by
+anything that sees the link — browser history, the access log, a `Referer` —
+which is a weakness of these pages rather than of the token: making them POST
+forms would remove it, and is left as a follow-up.
 
 ## Testing
 
-`php -l` clean on all 15 files. The check is mechanical: every listed action
-page calls `check_tokens()`, and every form that submits to one carries the
-token — verified by listing the two sets and comparing them.
+No PHP linter was available on the machine this was verified on, so the changes
+were read rather than executed: a `check_tokens()` call before the first write
+on each action page, an `echo form_tokens()` in each form that submits to one,
+and `hash_equals()` for the comparison. The coverage check is mechanical — list
+the pages that write, list the pages that call `check_tokens()`, compare.
 
 ## Notes
 
