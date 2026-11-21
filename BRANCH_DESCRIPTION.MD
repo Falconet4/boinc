@@ -10,9 +10,9 @@ they were created in, so a switch left a dark title bar over a light window (and
 the reverse), a grey band under the menu bar, and a dark status bar in the light
 theme. The last two fixups below are that.
 
-- **Base:** `upstream/master` (`d9fa5fb95`)
-- **Head:** `0cb21191e`
-- **6 commits — 7 files — +281/−9**
+- **Base:** `upstream/master` (`f7e5129c5`)
+- **Head:** `c13d303d7`
+- **9 commits — 7 files — +281/−9** (code and tests; this file excluded)
 - **Verified on Windows 10 22H2**, before and after, on the same machine
 
 ## Why
@@ -59,7 +59,7 @@ died this way.
 
 ## Commits
 
-### `6cd9dc4f6` — manager: rebuild the notebook once per theme change, not once per event
+### `994f8a5ef` — manager: rebuild the notebook once per theme change, not once per event
 
 *4 files (+39/−0)*
 
@@ -279,3 +279,12 @@ that way.
 The contributor of record is the human who opens the pull request, and they are
 responsible for the whole change: they reproduced the crash, applied and tested
 the fix on their own hardware, and can speak to its licensing and its origin.
+
+## Verification, Linux, 21 November 2026
+
+Nothing on this branch is reachable in the GTK build: `WM_THEMECHANGED`, the DWM
+title bar, `msctls_statusbar32` and the wxMSW chrome have no Linux counterpart.
+What was checked here is that the branch does not disturb the platform it does
+build for — the Manager compiles against wx 3.2.4 and behaves normally (Advanced
+and Simple views, Event Log open/close, clean exit).  The crash fix itself
+remains verified on Windows only.
