@@ -115,7 +115,7 @@ int RPC_CLIENT::init(const char* host, int port) {
     // get_ip_addr() may have resolved an IPv6 address; the socket family
     // must match the sockaddr_storage it filled in.
     //
-    boinc_socket(sock, addr.ss_family ? addr.ss_family : AF_INET);
+    boinc_socket(sock, socket_family(addr));
 
     // set up receive timeout; avoid hang if client doesn't respond
     //
@@ -162,7 +162,7 @@ int RPC_CLIENT::init_asynch(
     retval = get_ip_addr(host, port);
     if (retval) return retval;
 
-    retval = boinc_socket(sock, addr.ss_family ? addr.ss_family : AF_INET);
+    retval = boinc_socket(sock, socket_family(addr));
     BOINCTRACE("init_asynch() boinc_socket: %d\n", sock);
     if (retval) return retval;
 
@@ -223,9 +223,7 @@ int RPC_CLIENT::init_poll() {
     if (retval) {
         if (retry) {
             boinc_close_socket(sock);
-            retval = boinc_socket(
-                sock, addr.ss_family ? addr.ss_family : AF_INET
-            );
+            retval = boinc_socket(sock, socket_family(addr));
             retval = boinc_socket_asynch(sock, true);
             retval = connect(sock, (const sockaddr*)(&addr), addr_len(addr));
             BOINCTRACE("init_poll(): retrying connect: %d\n", retval);

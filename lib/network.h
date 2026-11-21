@@ -73,6 +73,20 @@ inline int addr_len(sockaddr_storage& s) {
 }
 #endif
 
+// The address family to open a socket for, given a sockaddr_storage that
+// resolve_hostname_or_ip_addr() filled in.  On Windows sockaddr_storage is
+// aliased to sockaddr_in (no IPv6), so there is no ss_family to inspect.
+//
+#ifdef _WIN32
+inline int socket_family(sockaddr_storage&) {
+    return AF_INET;
+}
+#else
+inline int socket_family(sockaddr_storage& s) {
+    return s.ss_family ? s.ss_family : AF_INET;
+}
+#endif
+
 #if defined(_WIN32) && !defined(__CYGWIN32__)
 typedef int BOINC_SOCKLEN_T;
 #else
