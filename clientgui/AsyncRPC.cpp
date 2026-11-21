@@ -513,14 +513,21 @@ int RPCThread::ProcessRPCRequest() {
     case RPC_PROJECT_ATTACH_POLL:
         retval = (m_pDoc->rpcClient).project_attach_poll(*(PROJECT_ATTACH_REPLY*)(current_request->arg1));
         break;
-    case RPC_ACCT_MGR_RPC:
+    case RPC_ACCT_MGR_RPC: {
+        // arg4 points at the request's own bool (repoint()).  Reading the
+        // value is what the callers mean; testing the pointer for null is
+        // always true now, and used to be how a false was passed.
+        //
+        const bool use_config_file = current_request->arg4
+            ? *(bool*)(current_request->arg4) : false;
         retval = (m_pDoc->rpcClient).acct_mgr_rpc(
             (const char*)(current_request->arg1),
             (const char*)(current_request->arg2),
             (const char*)(current_request->arg3),
-            (bool)(current_request->arg4 != NULL)
+            use_config_file
         );
         break;
+    }
     case RPC_ACCT_MGR_RPC_POLL:
         retval = (m_pDoc->rpcClient).acct_mgr_rpc_poll(*(ACCT_MGR_RPC_REPLY*)(current_request->arg1));
         break;
