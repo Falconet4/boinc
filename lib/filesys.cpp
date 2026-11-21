@@ -813,6 +813,11 @@ static int boinc_move_dir(const char* old, const char* newf) {
 // truncated file at the final name) and replaces a destination symlink
 // instead of writing through it, matching rename()/mv semantics.
 //
+// POSIX only: it is called from the EXDEV fallback below, and it uses
+// boinc_copy_attributes() and the 3-argument boinc_temp_file(), neither of
+// which exists in the Windows build.
+//
+#ifndef _WIN32
 static int boinc_copy_atomic(const char* old, const char* newf) {
     char dir[MAXPATHLEN], tmp[MAXPATHLEN];
     boinc_path_to_dir(newf, dir);
@@ -851,6 +856,7 @@ static int boinc_copy_atomic(const char* old, const char* newf) {
     if (boinc_delete_file(old)) return ERR_RENAME;
     return 0;
 }
+#endif
 
 static int boinc_rename_aux(const char* old, const char* newf) {
 #ifdef _WIN32
