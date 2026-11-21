@@ -3,9 +3,9 @@
 Sanitising of project-supplied notice HTML in the BOINC Manager, and restricting
 notice links to http(s).
 
-- **Base:** `upstream/master` (`d9fa5fb95`)
-- **Head:** `5def9357d`
-- **2 commits — 4 files — +485/−21 — 156 lib tests**
+- **Base:** `upstream/master` (`f7e5129c5`)
+- **Head:** `8429b60ab`
+- **5 commits — 4 files — +507/−22** (code and tests; this file excluded)
 
 ## Why
 
@@ -16,7 +16,7 @@ for the local client. The `link` field had the same trust problem.
 
 ## Commits
 
-### `e344d1a3e` — manager: sanitise project-supplied notice HTML, keeping presentational attributes
+### `4b6c84dea` — manager: sanitise project-supplied notice HTML, keeping presentational attributes
 
 *4 files (+428/−13)*
 
@@ -35,7 +35,7 @@ Adds `html_sanitize()` to `lib/str_util.cpp`:
 `NoticeListCtrl` wiring: `project_name` and `title` escaped *before* localise,
 description sanitised *after* localise and `eol_to_br`.
 
-### `5def9357d` — manager: only link a notice to http(s)
+### `3b27d3aec` — manager: only link a notice to http(s)
 
 *2 files (+65/−16)*
 
@@ -78,3 +78,34 @@ that way.
 The contributor of record is the human who opens the pull request, and they are
 responsible for the whole change: they read the full diff, verified it, ran and
 inspected the tests, and can speak to its licensing and its origin.
+
+## Commits added after this description was written
+
+The `## Commits` section above was written when the branch was shorter.  The
+commits below came later, from the review passes and the Linux test work.
+
+### `58a16745d` — lib: do not re-scan for a '>' that is not there
+
+When a tag has no closing '>', html_sanitize() escapes the '<' and advances one
+character -- and the next '<' starts the same scan again, all the way to the end
+of the input.  A notice description of "<a" repeats, or of unclosed attribute
+quotes, therefore costs O(n^2): 1 MB of it is minutes of the GUI thread, on
+every refresh, and the description comes from the project's feed with no length
+limit.
+
+### `8429b60ab` — manager: deny webview navigation by default, and drop the dead scan flags
+
+CNoticeListCtrl::OnLinkClicked() vetoed http(s) links and let everything else
+through, on the argument that nothing else could arrive.  It can: url_is_safe()
+deliberately admits relative hrefs, so a notice containing <a href="foo"> raises
+this event.  Harmless only because the page's base is about:blank.  The handler
+now vetoes everything except the initial load of that page.
+
+
+## Verification, Linux, 21 November 2026
+
+* The `test_str_util` cases for `html_sanitize()` pass inside the 207-test lib
+  suite.
+* Live Manager on an X session: the Notices tab renders the real project notices
+  (paragraphs, `read more` / `more info…` links, dates) — no blank pane, no
+  crash, and the webview stays on the local content.
