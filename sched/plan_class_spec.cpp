@@ -893,6 +893,28 @@ bool PLAN_CLASS_SPEC::check(
             return false;
         }
         if (per_device) {
+            // Start from the aggregate, as the AMD, Intel and Apple paths do:
+            // the per-device object replaces the device-specific fields below,
+            // and everything else (have_opencl, opencl_prop, have_cuda) has to
+            // keep the aggregate values.  A default-constructed COPROC_NVIDIA
+            // has have_opencl false, which rejected every plan class that also
+            // sets <opencl/> (opencl_nvidia_* were never sent) and zeroed
+            // gpu_ram on the way out.
+            //
+            // The copy also overwrites the per-device fields that
+            // gpu_select_devices() has just set, so put them back, as the
+            // Intel and Apple paths do.  peak_flops, peak_flops_dp and
+            // have_fp64 have to describe the selected device, not the fastest
+            // one on the host: otherwise min_gpu_peak_flops, max_gpu_peak_flops,
+            // min_gpu_dp_flops and require_fp64 are matched against a device
+            // this task may not get.
+            //
+            cp_dev_n = cp;
+            cp_dev_n.count = 1;
+            cp_dev_n.available_ram = gpu_ram_min;
+            cp_dev_n.have_fp64 = best_gpu.have_fp64;
+            cp_dev_n.peak_flops = best_gpu.peak_flops;
+            cp_dev_n.peak_flops_dp = best_gpu.peak_flops_dp;
             safe_strcpy(cp_dev_n.cuda_prop.name, best_gpu.name);
             cp_dev_n.cuda_prop.major = best_gpu.compcap_major;
             cp_dev_n.cuda_prop.minor = best_gpu.compcap_minor;
