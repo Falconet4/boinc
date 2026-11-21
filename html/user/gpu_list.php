@@ -187,7 +187,10 @@ function show_list($models, $name) {
     foreach ($models as $model=>$x) {
         if ($x->count < $max_count/10) continue;
         $s = number_format($min_time/$x->avg_time, 3);
-        echo "<li>($s)  $model\n";
+        // The model string is the coproc summary the host sent us, so it is
+        // volunteer-controlled: escape it here, it is echoed on a public page.
+        //
+        echo "<li>($s)  ".htmlspecialchars($model)."\n";
     }
     echo "</ol></td>\n";
 }

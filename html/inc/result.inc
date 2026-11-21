@@ -55,7 +55,10 @@ function get_platform($id) {
 
 function anon_platform_string($result, $rsc_name=null) {
     $app = get_app($result->appid);
-    $n = $app->user_friendly_name."<br>".  tra("Anonymous platform");
+    // The app name is project-supplied and this string is echoed into result
+    // tables; escape it, and keep the "<br>" that makes it markup.
+    //
+    $n = htmlspecialchars($app->user_friendly_name)."<br>".  tra("Anonymous platform");
     if ($rsc_name) {
         $n .= " ($rsc_name)";
     }
