@@ -101,7 +101,9 @@ echo "<p></p>";
 if ($preview == tra("Preview")) {
     panel(tra('Preview'),
         function() use($content, $title) {
-            echo "<span class=lead>$title</span><p>\n";
+            // The title is what the user typed into the form; escape it.
+            //
+            echo "<span class=lead>".htmlspecialchars($title)."</span><p>\n";
             echo output_transform($content, null);
         }
     );

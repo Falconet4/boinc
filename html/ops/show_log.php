@@ -38,8 +38,12 @@ if( isset($_GET["f"]) ){
     $f = "";
 }
 if( isset($_GET["s"]) ){
+    // Keep it raw: it is a regexp for grep_logs, and it is quoted with
+    // escapeshellarg() below.  escapeshellcmd() here would backslash-escape
+    // every metacharacter, so "CRITICAL|ERROR" would search for a literal "|"
+    // -- the field is labelled "Regexp" and this is what made it useless.
+    //
     $s = $_GET["s"];
-    $s = escapeshellcmd($s);
 } else {
     $s = "";
 }
