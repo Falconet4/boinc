@@ -35,7 +35,6 @@ set(LIBBOINC_HEADERS_GENERIC
     lib/app_ipc.h
     lib/base64.h
     lib/boinc_stdio.h
-    lib/cal_boinc.h
     lib/cc_config.h
     lib/cert_sig.h
     lib/cl_boinc.h
