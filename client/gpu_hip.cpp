@@ -491,13 +491,13 @@ void COPROC_AMD::get_hip(vector<string>& warnings) {
 
 #ifdef __linux__
         if (bus >= 0) {
-            int gfx_target = 0, simd_count = 0, wave_front = 0, clk_mhz = 0;
+            int gfx_target = 0, kfd_simd_count = 0, wave_front = 0, clk_mhz = 0;
             int pci_device_id = 0;
             double vram = 0;
             char node_name[256];
             node_name[0] = 0;
             if (kfd_lookup(
-                bus, gfx_target, simd_count, wave_front, clk_mhz, vram,
+                bus, gfx_target, kfd_simd_count, wave_front, clk_mhz, vram,
                 pci_device_id, node_name, sizeof(node_name))
             ) {
                 if (pci_device_id) cc.pci_info.device_id = pci_device_id;
@@ -518,8 +518,8 @@ void COPROC_AMD::get_hip(vector<string>& warnings) {
                 // is not the lane count; set_peak_flops() derives it from
                 // the CU count instead.
                 //
-                if (simd_count && wave_front == 32) {
-                    cc.hip_lane_count = simd_count * wave_front;
+                if (kfd_simd_count && wave_front == 32) {
+                    cc.hip_lane_count = kfd_simd_count * wave_front;
                 }
                 if (!cc.hip_cu_count && cc.hip_lane_count) {
                     // GCN reports one CU of 64 lanes; RDNA reports WGPs.
