@@ -11,8 +11,8 @@ the reverse), a grey band under the menu bar, and a dark status bar in the light
 theme. The last two fixups below are that.
 
 - **Base:** `upstream/master` (`d9fa5fb95`)
-- **Head:** `227361a84`
-- **4 commits — 6 files — +160/−1**
+- **Head:** `2c4c17272`
+- **5 commits — 7 files — +260/−5**
 - **Verified on Windows 10 22H2**, before and after, on the same machine
 
 ## Why
@@ -40,6 +40,22 @@ advanced:timers-stopped-state-saved
 repopulate:begin
 deleteNotebook:before-DeleteAllPages    <- last line before 0xC0000005
 ```
+
+That trace led to a pending flag cleared at the end of the rebuild, and for most
+switches it was enough. A longer hunt found that a switch is not one burst. On
+this machine Windows announces one switch over about 360 ms while the rebuild
+takes about 350 ms, so the *last* notification can arrive after the rebuild it
+started has finished — and a flag cleared at the end of the rebuild is already
+down by then. An instrumented build tracing the rebuild steps caught it:
+
+```
+14:30:00.221 notify -> rebuild 00.234 ... done 00.576
+14:30:00.580 notify -> 00.585 deferred-enter -> 00.588 panel-destroy  <- 0xC0000005
+```
+
+The echo started a second rebuild, 4 ms after the first, and the second one
+destroyed the notebook panel the first had just created. One switch in about 120
+died this way.
 
 ## Commits
 
@@ -100,8 +116,9 @@ waits on the process handle.
 ## Notes
 
 - The deferral means two theme changes in quick succession produce one rebuild.
-  That is the intended behaviour: one switch produces the burst, and a second
-  switch arriving before the deferred rebuild runs would have rebuilt anyway.
+  That is the intended behaviour: the rebuild applies whichever theme is in
+  force when it runs, and the settle check picks up a change that lands in the
+  middle of it.
 - Not fixed here, but visible in the same function: the handler ends with
   `delete eventLog` on a live `wxWindow`, with the comment "`eventLog->Destroy()`
   creates a race condition if used here". It is unrelated to this crash (the
@@ -134,6 +151,54 @@ waits on the process handle.
   Invalidating them, and `WM_THEMECHANGED`, do not fix it; re-creating them the
   way the pages and the Event Log already are does, and the panel now names its
   background colour instead of letting Windows remember one.
+- `2c4c17272` — **manager: coalesce a theme change by what it announces, not by
+  a flag.** The pending flag above still let a rare exit through, because one
+  switch is announced over a longer span than the rebuild takes; the coalescing
+  now lives in `CBOINCBaseFrame` and compares appearances instead. See "What a
+  theme change announces, and what it does not" below.
+
+## What a theme change announces, and what it does not
+
+The fix is in `CBOINCBaseFrame::QueueThemeChangeRebuild()`, shared by both
+frames, and it decides on the appearance rather than on elapsed time. A rebuild
+that has run records the appearance it applied in `m_bThemeAppearanceApplied`;
+a notification that finds the appearance in force equal to it has nothing to
+apply and is dropped, so the echo cannot start a second rebuild. No timeout is
+involved, and a real switch is never dropped, because it is by definition a
+different appearance.
+
+The same comparison covers the mirror case, which the measurement caught on the
+first flip of the hunt: the *first* notification of a switch can arrive before
+the new appearance is in force — 31 ms before it here — and it is dropped as
+well. Dropping it is right (a rebuild then would rebuild for the old theme), but
+the change must not be lost with it, so a dropped notification schedules one
+more look 500 ms later. That look is a no-op unless the appearance really
+changed, so it cannot loop.
+
+Trace of one switch, dark to light, instrumented build:
+
+```
+14:58:43.999 notify / queue-skip-echo          <- announced before the change
+14:58:44.029 notify / queue-needs-rebuild
+14:58:44.041 deferred-rebuild-enter / rebuild-enter ...
+14:58:44.738 rebuild-done / settle-armed
+14:58:44.754 notify / queue-skip-echo          <- the echo that used to kill it
+14:58:44.769 notify / queue-skip-echo
+14:58:44.778 notify / queue-skip-echo
+14:58:45.552 settle-timer / queue-settle-skip-echo
+```
+
+One rebuild, started 42 ms after the first notification and done 697 ms later,
+then nothing but dropped notifications.
+
+Fifty launches, four flips each, 200 switches:
+
+```
+DONE flips=200 deaths=0 flips-not-single-rebuild=0 echoes-suppressed=803
+```
+
+Every switch ended in exactly one rebuild; the previous build of this branch
+died in a fraction of those 200.
 
 ## The chrome, measured
 
