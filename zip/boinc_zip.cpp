@@ -81,15 +81,25 @@ namespace {
         return boinc_make_dirs(base_dir.c_str(), rel.c_str());
     }
 
-    // Reject archive entry names that would escape the extraction directory.
+    // Normalise an archive entry name into a relative path that stays inside
+    // the extraction directory, and reject the ones that cannot.
     //
     // Entry names are attacker-controlled: a project can ship an input archive
     // whose entries are "../../x" or "/etc/x", and both ensure_subdirs() and
-    // join_path() just concatenate.  Allow ordinary relative paths and the
-    // ".." *component* only where it stays inside (we do not allow it at all,
-    // since a legitimately packed archive does not need it).
+    // join_path() just concatenate.  Allow ordinary relative paths and no ".."
+    // component at all, since a legitimately packed archive does not need one.
     //
-    static bool is_safe_entry_name(const string& name) {
+    // The name has to be normalised, not merely checked: Windows strips
+    // trailing spaces and dots from every component before resolving it, so
+    // ".. ", ".. ." and "..." all mean ".." there.  Comparing the raw
+    // component against ".." lets them through, and if only the comparison
+    // used the trimmed form the write would still use the raw one.  So this
+    // returns the name to use, and the caller writes that.
+    //
+    // "." components ("./foo") are dropped: they are harmless and common.
+    //
+    static bool normalize_entry_name(const string& name, string& norm) {
+        norm.clear();
         if (name.empty()) return false;
         // absolute POSIX path
         if (name[0] == '/') return false;
@@ -97,17 +107,36 @@ namespace {
         if (name.size() >= 2 && name[1] == ':') return false;
         if (name[0] == '\\') return false;
 
-        // Walk the components; reject any ".." and any empty component that
-        // is not the trailing separator of a directory entry.
+        const bool dir_entry = (name.back() == '/' || name.back() == '\\');
+
         size_t pos = 0;
-        while (pos <= name.size()) {
+        while (pos < name.size()) {
             size_t sep = name.find_first_of("/\\", pos);
             if (sep == string::npos) sep = name.size();
             const string comp = name.substr(pos, sep-pos);
-            if (comp == "..") return false;
-            if (sep == name.size()) break;
-            pos = sep + 1;
+            pos = (sep < name.size()) ? sep + 1 : name.size();
+
+            if (comp.empty()) continue;             // "a//b": nothing to do
+
+            // Windows resolves a component after stripping its trailing spaces
+            // and dots, so judge what is left, and keep that.
+            size_t end = comp.size();
+            while (end > 0 && (comp[end-1] == ' ' || comp[end-1] == '.')) {
+                end--;
+            }
+            const string core = comp.substr(0, end);
+            if (core.empty()) {
+                if (comp.size() == 1 && comp[0] == '.') {
+                    continue;                       // a lone "." is a no-op
+                }
+                return false;                       // "..", "...", ".. ", "   "
+            }
+            if (!norm.empty()) norm += '/';
+            norm += core;
         }
+
+        if (norm.empty()) return false;
+        if (dir_entry) norm += '/';
         return true;
     }
 
@@ -242,11 +271,14 @@ int boinc_zip(
             string name = zs.name ? string(zs.name) : string();
             if (name.empty()) continue;
 
-            // Reject traversal and absolute paths before creating anything.
-            if (!is_safe_entry_name(name)) {
+            // Normalise the name away from traversal and absolute paths before
+            // creating anything, and write the normalised one.
+            string safe_name;
+            if (!normalize_entry_name(name, safe_name)) {
                 zip_discard(za);
                 return 2;
             }
+            name = safe_name;
 
             // Directory entry (convention: ends with '/')
             if (name.back() == '/' || name.back() == '\\') {
