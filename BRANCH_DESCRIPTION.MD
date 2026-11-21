@@ -4,9 +4,15 @@ BOINC Manager on Windows dies with an access violation when the Windows theme
 changes. This branch makes a theme change rebuild the UI once instead of once
 per notification, which is what was killing it.
 
+It also fixes what a theme change rebuilds *incompletely*: the window frame, the
+separator and padding above the notebook, and the status bar all kept the theme
+they were created in, so a switch left a dark title bar over a light window (and
+the reverse), a grey band under the menu bar, and a dark status bar in the light
+theme. The last two fixups below are that.
+
 - **Base:** `upstream/master` (`d9fa5fb95`)
-- **Head:** `c2137f9f2`
-- **2 commits — 4 files — +52/−0**
+- **Head:** `227361a84`
+- **4 commits — 6 files — +160/−1**
 - **Verified on Windows 10 22H2**, before and after, on the same machine
 
 ## Why
@@ -112,6 +118,51 @@ waits on the process handle.
   destroys panels the first has already replaced. The flag is now cleared after
   the rebuild, and the callback returns early if the frame is being deleted,
   which a close or a GUI-mode switch can make happen while it is queued.
+- `2c2ada047` — **manager: re-apply the title-bar theme when the Windows theme
+  changes.** DWM draws the frame from a per-window flag (`DWMWA_USE_IMMERSIVE_
+  DARK_MODE`) that wxWidgets sets when the window is created, and Windows does
+  not revisit an explicitly set value when the theme changes, so the title bar
+  stayed dark over a light window and light over a dark one until the Manager
+  was restarted. `CBOINCBaseFrame::ApplyTitleBarTheme()` sets the flag again at
+  the end of both frames' `RebuildForThemeChange()`.
+- `227361a84` — **manager: rebuild the chrome a theme change leaves behind.**
+  The separator above the notebook, the five pixels of padding under it and the
+  status bar are built once and kept the theme they were created in: the
+  separator kept the old 3D highlight, the padding kept `COLOR_APPWORKSPACE`
+  (171) once the light theme was on, and the status bar — a native
+  `msctls_statusbar32` — kept the colour of the theme it was created under.
+  Invalidating them, and `WM_THEMECHANGED`, do not fix it; re-creating them the
+  way the pages and the Event Log already are does, and the panel now names its
+  background colour instead of letting Windows remember one.
+
+## The chrome, measured
+
+The switches were captured with `PrintWindow(PW_RENDERFULLCONTENT)` and compared
+against a Manager started fresh in the same theme. Before the last two fixups,
+sampled at the middle of each band:
+
+| Region | started dark | after → light | started light | after → dark |
+|---|---|---|---|---|
+| title bar | 0 | 0 — should be 255 | 255 | 255 — should be 0 |
+| separator | 160/160 | 160/160 — should be 160/255 | 160/255 | 160/255 — should be 160/160 |
+| padding | 32 | 171 — should be 240 | 240 | 32 |
+| status bar | 51 | 51 — should be 240 | 240 | 0 — should be 51 |
+
+The padding is the one that is only wrong in the light direction: 171 is the
+classic `COLOR_APPWORKSPACE`, the colour Windows used for the panel the first
+time it painted it. The status bar's 0 after a switch to dark is from the
+reporter's captures of the shipped 8.3.0 build; the rest are measured on a build
+of this branch with the fixups removed.
+
+With the fixups, all four after-switch captures match the fresh start in the
+same theme over the frame, menu bar, separator, padding, tab strip and status
+bar — two dark switches and two light switches, one from each starting theme.
+
+A forced `RDW_INVALIDATE|RDW_ERASE|RDW_ALLCHILDREN|RDW_UPDATENOW` paint on the
+frame leaves every one of them unchanged, so they are not stale pixels; and
+`WM_THEMECHANGED` sent to the status bar repaints it white, neither theme's
+colour. The windows have to be re-created, not repainted.
+
 
 
 ## AI assistance
