@@ -3,9 +3,9 @@
 Server-side web security: SQL injection, command injection and stored XSS in the
 pages BOINC ships.
 
-- **Base:** `upstream/master` (`d9fa5fb95`)
-- **Head:** `fe6554a8e`
-- **2 commits — 10 files — +119/−34 — PHP lint clean**
+- **Base:** `upstream/master` (`f7e5129c5`)
+- **Head:** `ec9945396`
+- **4 commits — 13 files — +135/−38** (code and tests; this file excluded)
 
 ## Why
 
@@ -16,7 +16,7 @@ are directly exploitable, so it is the natural candidate to send first.
 
 ## The commit
 
-### `065ade1eb` — web: fix SQL injection, command injection and XSS in the shipped pages
+### `e50367169` — web: fix SQL injection, command injection and XSS in the shipped pages
 
 **SQL injection** — `html/inc/db_ops.inc` (+23/−5)
 - Table and sort identifiers are checked against an allowlist; they cannot be
@@ -81,3 +81,23 @@ that way.
 The contributor of record is the human who opens the pull request, and they are
 responsible for the whole change: they read the full diff, verified it, ran and
 inspected the tests, and can speak to its licensing and its origin.
+
+## Commits added after this description was written
+
+The `## Commits` section above was written when the branch was shorter.  The
+commits below came later, from the review passes and the Linux test work.
+
+### `ec9945396` — web: escape the three sinks the branch description claimed, and unbreak the regexp
+
+The description listed html/user/gpu_list.php, html/user/forum_post.php and
+html/inc/result.inc as escaped; none of the three was in the diff, and all
+three echo untrusted text raw:
+
+
+## Verification, Linux, 21 November 2026
+
+* `php -l` (PHP 8.3) reports no syntax error on any of the 30 changed `.php` and
+  `.inc` files.
+* Not exercised: the queries and the shell sinks themselves need a project
+  database and a live web front end.  None was created for this pass, so the
+  escaping and allowlist behaviour is still reviewed-by-reading only.
