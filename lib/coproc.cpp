@@ -339,6 +339,17 @@ void summary_json(
     }
 }
 
+// Megabytes for the per-device JSON.  The value is display-only, and the
+// source is a client-supplied double: converting one that is out of int's
+// range is undefined behaviour, so clamp it here.
+//
+static int ram_mb_for_json(double bytes) {
+    double mb = bytes / MEGA;
+    if (!(mb > 0)) return 0;
+    if (mb > 1.e9) return 1000000000;
+    return (int)mb;
+}
+
 void device_json(char* buf, size_t len, const GPU_DEVICE& d) {
     char ename[4096];
     json_escape_string(d.name, ename, sizeof(ename));
@@ -362,7 +373,7 @@ void device_json(char* buf, size_t len, const GPU_DEVICE& d) {
         d.cuda_version, d.driver_version, d.opencl_version,
         d.metal_support, d.ncores, d.have_fp64?"true":"false",
         d.peak_flops, d.peak_flops_dp,
-        (int)(d.total_ram/MEGA)
+        ram_mb_for_json(d.total_ram)
     );
 }
 
@@ -387,7 +398,7 @@ static void amd_device_json(char* buf, size_t len, const COPROC_AMD_DEVICE& d) {
         d.have_hip?"true":"false", d.hip_version,
         d.have_fp64?"true":"false",
         d.peak_flops, d.peak_flops_dp,
-        (int)(d.total_ram/MEGA)
+        ram_mb_for_json(d.total_ram)
     );
 }
 
@@ -701,6 +712,12 @@ void COPROC_NVIDIA::description(char* buf, int buflen) {
 
 #ifndef _USING_FCGI_
 void COPROC_NVIDIA::write_xml(MIOFILE& f, bool scheduler_rpc) {
+    // The aggregate name comes from the driver and can contain '&' or '<'.
+    char agg_name[1600];
+    xml_escape(
+        have_cuda?cuda_prop.name:opencl_prop.name,
+        agg_name, sizeof(agg_name)
+    );
     f.printf(
         "<coproc_cuda>\n"
         "   <count>%d</count>\n"
@@ -709,7 +726,7 @@ void COPROC_NVIDIA::write_xml(MIOFILE& f, bool scheduler_rpc) {
         "   <have_cuda>%d</have_cuda>\n"
         "   <have_opencl>%d</have_opencl>\n",
         count,
-        have_cuda?cuda_prop.name:opencl_prop.name,
+        agg_name,
         available_ram,
         have_cuda ? 1 : 0,
         have_opencl ? 1 : 0
@@ -1196,6 +1213,11 @@ void COPROC_NVIDIA::fake(
 
 #ifndef _USING_FCGI_
 void COPROC_AMD::write_xml(MIOFILE& f, bool scheduler_rpc) {
+    // The name and the arch string come from the driver and can contain '&'
+    // or '<', which would corrupt this document.
+    char agg_name[1600], agg_arch[1600];
+    xml_escape(name, agg_name, sizeof(agg_name));
+    xml_escape(gcn_arch, agg_arch, sizeof(agg_arch));
     f.printf(
         "<coproc_ati>\n"
         "   <count>%d</count>\n"
@@ -1211,7 +1233,7 @@ void COPROC_AMD::write_xml(MIOFILE& f, bool scheduler_rpc) {
         "   <gfx_target_version>%d</gfx_target_version>\n"
         "   <gcn_arch>%s</gcn_arch>\n",
         count,
-        name,
+        agg_name,
         available_ram,
         have_opencl ? 1 : 0,
         have_hip ? 1 : 0,
@@ -1221,7 +1243,7 @@ void COPROC_AMD::write_xml(MIOFILE& f, bool scheduler_rpc) {
         hip_lane_count,
         hip_clock_khz,
         gfx_target_version,
-        gcn_arch
+        agg_arch
     );
     if (scheduler_rpc) {
         write_request(f);
@@ -1530,9 +1552,13 @@ void COPROC_AMD::set_peak_flops() {
         // on RDNA (wave32), i.e. 128 lanes, and one per CU on GCN
         // (wave64), i.e. 64 lanes.
         //
-        int lanes = hip_lane_count;
-        if (!lanes && hip_cu_count) {
-            lanes = hip_cu_count
+        // hip_cu_count comes from the client and is not bounded by the parser,
+        // so the multiply is done in double: 2^31 lanes would overflow an int
+        // (UB), and the product only has to be finite to be turned into FLOPS.
+        //
+        double lanes = hip_lane_count;
+        if (lanes <= 0 && hip_cu_count > 0) {
+            lanes = (double)hip_cu_count
                 * hip_lanes_per_cu(hip_warp_size, gfxip_major, gfx_target_version);
         }
         // One FMA per lane per clock is 2 FLOPs; RDNA 3+ (gfx11/gfx12)
@@ -1540,7 +1566,7 @@ void COPROC_AMD::set_peak_flops() {
         // unknown, stay with the conservative factor.
         //
         double flops_per_lane_per_clock = (gfxip_major >= 11) ? 4. : 2.;
-        x = (double)lanes * flops_per_lane_per_clock
+        x = lanes * flops_per_lane_per_clock
             * (hip_clock_khz * 1.e3);
     } else if (simd_count) {
         x = simd_count * wavefront_size * 5 * engine_clock_mhz * 1.e6;
@@ -1633,6 +1659,9 @@ void COPROC_AMD::fake(double ram, double avail_ram, int n) {
 
 #ifndef _USING_FCGI_
 void COPROC_INTEL::write_xml(MIOFILE& f, bool scheduler_rpc) {
+    // The aggregate name comes from the driver and can contain '&' or '<'.
+    char agg_name[1600];
+    xml_escape(opencl_prop.name, agg_name, sizeof(agg_name));
     f.printf(
         "<coproc_intel_gpu>\n"
         "   <count>%d</count>\n"
@@ -1640,7 +1669,7 @@ void COPROC_INTEL::write_xml(MIOFILE& f, bool scheduler_rpc) {
         "   <available_ram>%f</available_ram>\n"
         "   <have_opencl>%d</have_opencl>\n",
         count,
-        opencl_prop.name,
+        agg_name,
         available_ram,
         have_opencl ? 1 : 0
     );
@@ -1783,6 +1812,10 @@ void COPROC_INTEL::fake(double ram, double avail_ram, int n) {
 
 #ifndef _USING_FCGI_
 void COPROC_APPLE::write_xml(MIOFILE& f, bool scheduler_rpc) {
+    // The model comes from system_profiler / the driver and can contain '&'
+    // or '<'.
+    char agg_model[1600];
+    xml_escape(model, agg_model, sizeof(agg_model));
     f.printf(
         "<coproc_apple_gpu>\n"
         "   <count>%d</count>\n"
@@ -1793,7 +1826,7 @@ void COPROC_APPLE::write_xml(MIOFILE& f, bool scheduler_rpc) {
         "   <ncores>%d</ncores>\n"
         "   <metal_support>%d</metal_support>\n",
         count,
-        model,
+        agg_model,
         available_ram,
         have_metal ? 1 : 0,
         have_opencl ? 1 : 0,

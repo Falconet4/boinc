@@ -348,6 +348,20 @@ void COPROC_AMD::correlate(
 
     if (!count) return;
 
+    // Drop the devices the user told us to ignore.  set_devices() builds the
+    // list from every detected GPU and does not know about
+    // <ignore_gpu_instance>, but the scheduler treats each entry as a device it
+    // may schedule on, so an ignored card must not be in it.
+    //
+    if (!ignore_devs.empty()) {
+        vector<COPROC_AMD_DEVICE> keep;
+        for (unsigned int k=0; k<devices.size(); k++) {
+            if (in_vector(devices[k].device_num, ignore_devs)) continue;
+            keep.push_back(devices[k]);
+        }
+        devices.swap(keep);
+    }
+
     // Conservative summary for old servers (which only see the aggregate),
     // plus the full device list for the new per-device path.
     //

@@ -354,9 +354,20 @@ inline bool gpu_device_matches(
     return true;
 }
 
+// The device list is the whole story here: the client builds it after applying
+// its own <ignore_gpu_instance> and reports only the devices it is willing to
+// run on, so every entry is a candidate.
+//
+// It must not be filtered against COPROC::device_nums.  That array is the
+// client's internal index mapping: it is filled in by the client's
+// correlate(), never sent to the server (the only writer of a <device_nums>
+// element is the cc_config.xml dump), and the parser therefore leaves it all
+// zero.  Filtering by it admits device 0 only -- all work pinned to the first
+// GPU, and no work at all on a host whose usable devices do not include 0.
+//
 inline int gpu_matching_devices(
     const GPU_DEVICE_REQUIREMENTS& req,
-    const std::vector<GPU_DEVICE>& devices, const COPROC& cp,
+    const std::vector<GPU_DEVICE>& devices,
     int* nums, int max, int& best, double& min_ram
 ) {
     best = -1;
@@ -364,9 +375,6 @@ inline int gpu_matching_devices(
     int n = 0;
     for (unsigned int i=0; i<devices.size(); i++) {
         const GPU_DEVICE& d = devices[i];
-        if (!device_num_allowed(cp.device_nums, cp.count, d.device_num)) {
-            continue;
-        }
         double ram = 0;
         if (!gpu_device_matches(req, d, ram, NULL)) continue;
         if (n < max) nums[n++] = d.device_num;
@@ -391,9 +399,6 @@ inline int amd_matching_devices(
     int n = 0;
     for (unsigned int i=0; i<cp.devices.size(); i++) {
         const COPROC_AMD_DEVICE& d = cp.devices[i];
-        if (!device_num_allowed(cp.device_nums, cp.count, d.device_num)) {
-            continue;
-        }
         double ram = 0;
         if (!amd_device_matches(req, d, ram, NULL)) continue;
         if (n < max) {

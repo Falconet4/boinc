@@ -215,7 +215,7 @@ struct SCHED_DB_RESULT : DB_RESULT {
     char platform_name[256];
     BEST_APP_VERSION bav;
     int gpu_device_nums[MAX_COPROC_INSTANCES];
-    int n_gpu_device_nums;
+    int n_gpu_device_nums = 0;
 
     int write_to_client(FILE*);
 };
