@@ -11,8 +11,8 @@ the reverse), a grey band under the menu bar, and a dark status bar in the light
 theme. The last two fixups below are that.
 
 - **Base:** `upstream/master` (`d9fa5fb95`)
-- **Head:** `2c4c17272`
-- **5 commits — 7 files — +260/−5**
+- **Head:** `0cb21191e`
+- **6 commits — 7 files — +281/−9**
 - **Verified on Windows 10 22H2**, before and after, on the same machine
 
 ## Why
@@ -156,6 +156,13 @@ waits on the process handle.
   switch is announced over a longer span than the rebuild takes; the coalescing
   now lives in `CBOINCBaseFrame` and compares appearances instead. See "What a
   theme change announces, and what it does not" below.
+- `0cb21191e` — **manager: decide dark mode the way the application does, in one
+  place.** The rebuilds asked `wxSystemAppearance::IsDark()`, which answers "did
+  *this application* end up dark" rather than "did the user ask for dark
+  applications", and lags the setting by ~230 ms. `BOINCGUIApp::OnInit()`
+  already ORs in `AreAppsDark()` on Windows; both rebuilds and the comparison
+  now share one `CBOINCBaseFrame::AppearanceIsDarkNow()` that does the same. See
+  "Which of Windows' two theme settings" below.
 
 ## What a theme change announces, and what it does not
 
@@ -199,6 +206,37 @@ DONE flips=200 deaths=0 flips-not-single-rebuild=0 echoes-suppressed=803
 
 Every switch ended in exactly one rebuild; the previous build of this branch
 died in a fraction of those 200.
+
+## Which of Windows' two theme settings
+
+Windows has two: `AppsUseLightTheme` (applications) and `SystemUsesLightTheme`
+(taskbar, window frames), and Windows 11 lets the user set them differently.
+BOINC's colours belong to the first. `wxSystemAppearance::IsDark()` does not
+answer that question — its own header says "true if *this application itself*
+uses a dark theme", which under MSW is whatever wxWidgets' `MSWEnableDarkMode()`
+opt-in settled on at start-up — while `AreAppsDark()` is the applications
+setting. `BOINCGUIApp::OnInit()` takes both (`IsDark() || AreAppsDark()`, under
+`__WXMSW__`), which is why a Manager started in dark mode is dark; the two
+frames' rebuilds took `IsDark()` alone.
+
+It matters at the instant of a switch, because `IsDark()` is late. On this
+machine, going from light to "applications dark, system elements light":
+
+```
+15:18:57.538 appearance-isdark-no   appearance-appsdark-yes   <- the notification
+15:18:57.538 queue-needs-rebuild
+15:18:57.772 appearance-isdark-yes  appearance-appsdark-yes   <- inside the rebuild
+```
+
+So a rebuild that took `IsDark()` alone painted a dark desktop light — the
+Windows 11 complaint this branch's issue quotes — and the coalescing, which
+compares the appearance a rebuild applied with the appearance in force, would
+have read "no change" there and skipped the rebuild entirely. Both now call
+`CBOINCBaseFrame::AppearanceIsDarkNow()`, one answer to the question `OnInit()`
+answers, and a probe over the four combinations (`mixed-probe.ps1`, an
+instrumented build) shows exactly one rebuild per actual change of the
+applications setting and none for a change of the system setting alone, with
+the Manager dark in the split case.
 
 ## The chrome, measured
 
