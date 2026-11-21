@@ -68,23 +68,24 @@ namespace test_proc_control {
         int child = (int)fork();
         ASSERT_NE(-1, child);
         if (child == 0) {
-            close(fds[0]);
-            // block until the parent has read the start time
+            close(fds[1]);
+            // block until the parent has read the start time: read the read
+            // end, which is fds[0] (pipe() hands back read then write)
             char c;
-            while (read(fds[1], &c, 1) < 0 && errno == EINTR) {
+            while (read(fds[0], &c, 1) < 0 && errno == EINTR) {
                 // retry
             }
             _exit(0);
         }
-        close(fds[1]);
+        close(fds[0]);
 
         PROC_START_TIME start = 0;
         EXPECT_TRUE(proc_start_time(child, start));
         EXPECT_NE(0u, start);
 
-        // let the child exit, then reap it
-        ASSERT_EQ(1, (int)write(fds[0], "x", 1));
-        close(fds[0]);
+        // let the child exit, then reap it: write the write end, fds[1]
+        ASSERT_EQ(1, (int)write(fds[1], "x", 1));
+        close(fds[1]);
         int status = 0;
         ASSERT_EQ(child, (int)waitpid(child, &status, 0));
 
