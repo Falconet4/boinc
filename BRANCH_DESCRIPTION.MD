@@ -3,9 +3,9 @@
 Zip extraction, shell command construction, and fixed-size buffer handling in
 the client and scheduler.
 
-- **Base:** `upstream/master` (`d9fa5fb95`)
-- **Head:** `f850f2355`
-- **2 commits — 12 files — +242/−61 — 151 lib tests**
+- **Base:** `upstream/master` (`f7e5129c5`)
+- **Head:** `b9e65afa9`
+- **4 commits — 12 files — +271/−63** (code and tests; this file excluded)
 
 ## Why
 
@@ -16,7 +16,7 @@ length.
 
 ## The commit
 
-### `d6071f616` — harden zip extraction, shell commands and fixed-size buffers, and reject a non-positive size in unescape_url
+### `ac706c0bf` — harden zip extraction, shell commands and fixed-size buffers, and reject a non-positive size in unescape_url
 
 **Zip slip** — `zip/boinc_zip.cpp` (+36/−0)
 `is_safe_entry_name()` rejects absolute paths, drive letters (`C:\`) and any
@@ -84,3 +84,29 @@ that way.
 The contributor of record is the human who opens the pull request, and they are
 responsible for the whole change: they read the full diff, verified it, ran and
 inspected the tests, and can speak to its licensing and its origin.
+
+## Commits added after this description was written
+
+The `## Commits` section above was written when the branch was shorter.  The
+commits below came later, from the review passes and the Linux test work.
+
+### `b9e65afa9` — zip, client: fix three defects the zip-slip review found
+
+normalize_entry_name() returned false when a name had nothing left after
+dropping "." components, and the caller treats false as fatal: an archive
+containing an entry named "./" -- which is what "zip -r out.zip ." writes at
+the front of every archive -- aborted the whole extraction after the first
+entries were already on disk.  A name that normalises to nothing is a no-op,
+not an escape: report success with an empty name and let the caller skip it.
+
+
+## Verification, Linux, 21 November 2026
+
+* `boinc_zip(UNZIP_IT, …)` run against crafted archives: `../escape.txt`,
+  `/abs_escape.txt`, `a/../../b.txt`, `..`, and `sub/./../../x` are each rejected
+  (return 2) and nothing is written outside the destination directory.
+* A benign archive containing `./dot.txt` still extracts, as `dot.txt` — the case
+  the earlier pass broke by aborting on a normalised-empty name.
+* The shell-free directory move is exercised with metacharacter names (`;`,
+  `$()`, backticks, quotes, newline); see branch 02's note.
+* `test_zip` (18 cases) passes inside the 207-test lib suite.
