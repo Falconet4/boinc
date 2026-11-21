@@ -2,8 +2,9 @@
 
 CSRF tokens on the project's state-changing web actions.
 
-- **Base:** `upstream/master` (`d9fa5fb95`)
-- **Head:** `b2fc2bdc5`
+- **Base:** `upstream/master` (`f7e5129c5`)
+- **Head:** `b6ca3491d`
+- **4 commits — 17 files — +54/−4** (code and tests; this file excluded)
 - **1 commit — 15 files — +31/−3 — PHP lint clean**
 
 ## Why
@@ -16,7 +17,7 @@ signed in.
 
 ## The commit
 
-### `b2fc2bdc5` — web: require CSRF tokens on the state-changing action pages
+### `d4879facd` — web: require CSRF tokens on the state-changing action pages
 
 Adds `check_tokens()` to every action page and `url_tokens()` to every form that
 submits to one:
@@ -73,3 +74,30 @@ that way.
 The contributor of record is the human who opens the pull request, and they are
 responsible for the whole change: they read the full diff, verified it, ran and
 inspected the tests, and can speak to its licensing and its origin.
+
+## Commits added after this description was written
+
+The `## Commits` section above was written when the branch was shorter.  The
+commits below came later, from the review passes and the Linux test work.
+
+### `5d82a997f` — web: guard the profile form, and compare tokens in constant time
+
+Editing a profile is one of the state-changing actions the summary names, and it
+was the one left without a token: another site could rewrite a logged-in user's
+profile -- including wiping its picture -- with a plain POST.  check_tokens() at
+the submit, form_tokens() in the form.
+
+### `b6ca3491d` — web: bound the token timestamp, and reject a non-numeric one
+
+valid_tokens() compared time() against $tnow without checking that $tnow is a
+decimal integer: a non-numeric value reached the arithmetic as a string, and a
+timestamp far in the future would never expire.  Require digits, cast once, and
+reject a token dated more than five minutes ahead of the server clock.
+
+
+## Verification, Linux, 21 November 2026
+
+* `php -l` clean on all 18 changed files.
+* Not exercised: issuing and checking tokens needs a live project database and a
+  browser session.  The `hash_equals()` comparison and the timestamp bound are
+  reviewed-by-reading only.
