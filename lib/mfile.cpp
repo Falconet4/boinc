@@ -166,6 +166,13 @@ int MFILE::close() {
         free(buf);
         buf = NULL;
     }
+    // flush() keeps unwritten bytes in buf and len so a caller can retry, but
+    // close() has just freed buf: leaving len set would make the next puts()
+    // or printf() write at buf+len in a fresh, uninitialised buffer (and past
+    // it, if len is large).  The retry path is close() + open(), and open()
+    // starts empty, so nothing is lost by clearing it here.
+    //
+    len = 0;
     return retval;
 }
 
