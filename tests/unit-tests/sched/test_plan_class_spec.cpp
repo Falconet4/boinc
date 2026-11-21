@@ -235,8 +235,6 @@ TEST(test_plan_class_spec, vendor_matching_set) {
     devices.push_back(make_gpu_device(
         "GTX 1080", 2, 6, 1, 9000, true, 8.9e12, 0.28e12, 8e9
     ));
-    COPROC cp;
-    cp.count = 3;
     int nums[MAX_COPROC_INSTANCES];
     int best = -1;
     double min_ram = 0;
