@@ -75,8 +75,8 @@ namespace test_hostinfo_linux {
 
     TEST_F(test_hostinfo_linux, parse_openwrt_model) {
         const std::filesystem::path fixture_path =
-            std::filesystem::current_path().parent_path() /
-            "unit-tests" / "testdata" / "sysinfo-model.openwrt";
+            std::filesystem::absolute(__FILE__).parent_path().parent_path()
+            / "testdata" / "sysinfo-model.openwrt";
 
         FILE* model_file = fopen(fixture_path.string().c_str(), "r");
         ASSERT_NE(nullptr, model_file);
@@ -90,8 +90,8 @@ namespace test_hostinfo_linux {
 
     TEST_F(test_hostinfo_linux, parse_openwrt_model_truncated) {
         const std::filesystem::path fixture_path =
-            std::filesystem::current_path().parent_path() /
-            "unit-tests" / "testdata" / "sysinfo-model.openwrt";
+            std::filesystem::absolute(__FILE__).parent_path().parent_path()
+            / "testdata" / "sysinfo-model.openwrt";
 
         FILE* model_file = fopen(fixture_path.string().c_str(), "r");
         ASSERT_NE(nullptr, model_file);
@@ -105,8 +105,8 @@ namespace test_hostinfo_linux {
 
     TEST_F(test_hostinfo_linux, parse_openwrt_model_empty) {
         const std::filesystem::path fixture_path =
-            std::filesystem::current_path().parent_path() /
-            "unit-tests" / "testdata" / "sysinfo-model.empty";
+            std::filesystem::absolute(__FILE__).parent_path().parent_path()
+            / "testdata" / "sysinfo-model.empty";
 
         FILE* model_file = fopen(fixture_path.string().c_str(), "r");
         ASSERT_NE(nullptr, model_file);
