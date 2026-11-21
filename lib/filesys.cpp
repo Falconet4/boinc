@@ -823,7 +823,28 @@ static int boinc_copy_atomic(const char* old, const char* newf) {
     boinc_path_to_dir(newf, dir);
     auto out = boinc_temp_file(dir, "ren", tmp);
     if (!out) return ERR_FOPEN;
-    auto in = boinc_fopen(old, "rb");
+
+    // Open the source with O_NOFOLLOW and require a regular file.  The caller
+    // lstat()s the name first, but a rename onto another filesystem goes
+    // through here, and a symlink swapped in between the two checks would make
+    // us copy the link target's content (anything the client can read) instead
+    // of the file the caller looked at.
+    //
+    int rflags = O_RDONLY;
+#ifdef O_NOFOLLOW
+    rflags |= O_NOFOLLOW;
+#endif
+    int ifd = open(old, rflags);
+    FILE* in = NULL;
+    if (ifd >= 0) {
+        struct stat sb;
+        if (!fstat(ifd, &sb) && S_ISREG(sb.st_mode)) {
+            in = fdopen(ifd, "rb");
+        }
+        if (!in) {
+            ::close(ifd);
+        }
+    }
     if (!in) {
         boinc::fclose(out);
         boinc_delete_file(tmp);
