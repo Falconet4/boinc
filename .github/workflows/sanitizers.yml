@@ -81,7 +81,12 @@ jobs:
       - name: Configure
         run: |
           ./_autosetup
-          ./configure --disable-server --disable-manager
+          # The client is linked fully static by default (client/Makefile.am adds
+          # -static unless DYNAMIC_CLIENT), and a fully static executable cannot
+          # carry ASan/UBSan: gcc has no static libasan to link against, so the
+          # build would fail rather than instrument anything.
+          ./configure --disable-server --disable-manager \
+            --enable-dynamic-client-linkage
 
       - name: Build
         id: build

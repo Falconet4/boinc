@@ -5,14 +5,14 @@ autotools helpers.
 
 - **Base:** `upstream/master` (`d9fa5fb95`)
 - **Head:** `1c35c3395`
-- **3 commits — 3 files — +137/−8 — 150 lib tests**
+- **3 commits — 3 files — +145/−8 — 150 lib tests in the tree (not run by this job)**
 
 ## Why
 
 The series fixes a lot of undefined behaviour and buffer handling. None of it is
 worth much without something that fails the build when it regresses. This adds
-a sanitizer job that actually runs the client's GPU detection and the test
-suite, and repairs two quoting bugs that break `_autosetup` on paths with
+a sanitizer job that actually runs the client's GPU detection under ASan and
+UBSan, and repairs two quoting bugs that break `_autosetup` on paths with
 spaces.
 
 ## Commits
@@ -22,10 +22,18 @@ spaces.
 *1 file (+126/−0)* `.github/workflows/sanitizers.yml`
 
 Builds the client and libraries with `-fsanitize=address,undefined`, then:
-- runs the unit-test suites under the sanitizers,
-- runs `client/boinc_client --detect_gpus`,
+- runs `client/boinc --detect_gpus` and parses the `coproc_info.xml` it writes,
+  so a malformed report fails the job,
 - verifies with `nm` that the binaries really are instrumented (a build that
-  silently dropped the flags would otherwise pass).
+  silently dropped the flags would otherwise pass),
+- shows the sanitizer output, which `diagnostics_init()` diverts into the data
+  directory rather than the job log, and fails if those files are missing.
+
+The client is configured with `--enable-dynamic-client-linkage`: the default is
+a fully static link, which cannot carry ASan/UBSan at all.
+
+The unit-test suites are **not** run by this job — `make check` needs the server
+side, which the job configures out — so they remain the developer's step.
 
 The pinned checkout SHA keeps the job reproducible.
 
@@ -46,8 +54,9 @@ push and pull-request trigger lists.
 
 ## Testing
 
-The workflow runs on GitHub. Locally the same commands were run by hand under
-ASan/UBSan (see the verification log in `PR_Review.md`).
+The workflow runs on GitHub. The same commands were run by hand here under
+ASan/UBSan while developing the series; the `nm` checks are what stop a silent
+loss of the sanitizer flags from passing.
 
 ## Notes
 
