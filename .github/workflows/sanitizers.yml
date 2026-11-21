@@ -4,6 +4,10 @@ name: sanitizers
 # and run the GPU-detection path.  This is a smoke test intended to
 # catch the classes of bug that ordinary compilation does not: buffer
 # overruns, use-after-free and integer/pointer undefined behaviour.
+#
+# The job configures with --disable-server, so sched/ and tools/ are not
+# built here.  They are deliberately absent from the `paths:` triggers, which
+# would otherwise promise sanitizer coverage this job cannot deliver.
 
 on:
   pull_request:
@@ -11,8 +15,6 @@ on:
       - 'client/**'
       - 'lib/**'
       - 'api/**'
-      - 'sched/**'
-      - 'tools/**'
       - 'configure.ac'
       - 'Makefile.am'
       - '**/Makefile.am'
@@ -29,8 +31,6 @@ on:
       - 'client/**'
       - 'lib/**'
       - 'api/**'
-      - 'sched/**'
-      - 'tools/**'
       - 'configure.ac'
       - 'Makefile.am'
       - '**/Makefile.am'
