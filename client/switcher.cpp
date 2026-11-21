@@ -196,8 +196,12 @@ int main(int /*argc*/, char** argv) {
                 );
                 _exit(1);
             }
-            // Clear the caller's supplementary groups if permitted; passing
-            // them on would let the application reach BOINC's data directory.
+            // Clear the caller's supplementary groups if we are allowed to.
+            // In the setuid+setgid install mode we are not root here, so
+            // setgroups() fails with EPERM and is tolerated: the groups the
+            // installer chose for the slot stay, which is the same trust the
+            // setgid bit already grants.  Where we are root, this is what
+            // stops the application from reaching BOINC's data directory.
             if (setgroups(0, NULL) && errno != EPERM) {
                 fprintf(stderr, "switcher: setgroups() failed: %s\n", strerror(errno));
                 _exit(1);
@@ -278,9 +282,14 @@ int main(int /*argc*/, char** argv) {
 
         getcwd(current_dir, sizeof(current_dir));
 
-        // These arguments are interpolated into a shell command run as
-        // root.  Reject characters that can escape the quoting; spaces
-        // and normal path characters remain allowed.
+        // These arguments end up in shell commands run as root.  Reject the
+        // characters that could break out of the places they are inserted
+        // into: the path is inserted inside double quotes (`"..."`), the
+        // arguments after it inside single quotes (`'...'`), and the pid is
+        // formatted from an int.  So `"`, `$`, backtick and `\` matter for the
+        // double-quoted slot, and `'` for the single-quoted ones; newlines
+        // would let an argument become its own command line.  Everything else,
+        // including spaces and the usual path characters, stays allowed.
         //
         for (int k=1; argv[k]; k++) {
             for (const char* p=argv[k]; *p; p++) {
